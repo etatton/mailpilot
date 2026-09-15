@@ -79,6 +79,7 @@
   <span class="spacer"></span>
   <span class="sub" id="lastPoll" style="color:var(--soft);font-size:0.82rem"></span>
   <button class="btn secondary" onclick="pollNow()">Check mail now</button>
+  <button class="btn secondary" onclick="openVoice()">Voice</button>
   <button class="btn secondary" onclick="openSettings()">Settings</button>
 </header>
 <div class="banner err" id="errBanner" hidden>
@@ -131,6 +132,40 @@
     </span>
   </div>
 </dialog>
+<dialog id="voiceDlg">
+  <h2 style="margin:0 0 6px;font-size:1.15rem">Your voice</h2>
+  <p style="color:var(--soft);font-size:0.9rem;margin:0 0 10px">Paste real emails you've written; MailPilot drafts in that voice. “Analyze my voice” distills them into a profile you can edit — the profile guides every draft.</p>
+  <label for="newSample">Add a writing sample</label>
+  <textarea id="newSample" rows="5" placeholder="Paste an email you sent that sounds like you"></textarea>
+  <div class="actions">
+    <button class="btn secondary" onclick="addSample()">Add sample</button>
+    <button class="btn" id="analyzeBtn" onclick="analyzeVoice()">Analyze my voice</button>
+  </div>
+  <div id="sampleList" style="margin-top:12px"></div>
+  <label for="profileBox">Voice profile <span style="font-weight:400;color:var(--soft)">(editable — drafts follow this)</span></label>
+  <textarea id="profileBox" rows="7" placeholder="Empty — add samples and click Analyze, or write your own profile."></textarea>
+  <div class="actions" style="justify-content:flex-end">
+    <button class="btn secondary" onclick="document.getElementById('voiceDlg').close()">Close</button>
+    <button class="btn" onclick="saveProfile()">Save profile</button>
+  </div>
+</dialog>
+
+<dialog id="regenDlg">
+  <h2 style="margin:0 0 10px;font-size:1.1rem">Redraft this reply</h2>
+  <div class="actions">
+    <button class="btn secondary" onclick="doRegen('Make it warmer and friendlier')">Warmer</button>
+    <button class="btn secondary" onclick="doRegen('Make it more formal and professional')">More formal</button>
+    <button class="btn secondary" onclick="doRegen('Make it more casual and relaxed')">More casual</button>
+    <button class="btn secondary" onclick="doRegen('Make it significantly shorter')">Shorter</button>
+  </div>
+  <label for="regenGuidance">Or tell it what to change</label>
+  <input type="text" id="regenGuidance" placeholder="e.g. mention I'm away next week; don't commit to a date">
+  <div class="actions" style="justify-content:flex-end">
+    <button class="btn secondary" onclick="document.getElementById('regenDlg').close()">Cancel</button>
+    <button class="btn" onclick="doRegen(document.getElementById('regenGuidance').value)">Redraft</button>
+  </div>
+</dialog>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -218,13 +253,45 @@ async function approve(id){
   else toast('Blocked: ' + (r.reason||'unknown'));
   refresh();
 }
-async function regen(id){
-  const guidance = prompt('Any guidance for the new draft? (leave empty to just retry)') ;
-  if (guidance===null) return;
+let regenId = null;
+function regen(id){ regenId = id; $('regenGuidance').value=''; $('regenDlg').showModal(); }
+async function doRegen(guidance){
+  $('regenDlg').close();
   toast('Redrafting…');
-  const r = await api(`/api/drafts/${id}/regenerate`,'POST',{guidance});
+  const r = await api(`/api/drafts/${regenId}/regenerate`,'POST',{guidance: guidance||''});
   if (r.ok===false) toast('Redraft failed: ' + r.message);
   refresh();
+}
+
+async function openVoice(){
+  const v = await api('/api/voice');
+  $('profileBox').value = v.profile || '';
+  $('sampleList').innerHTML = v.samples.length
+    ? v.samples.map(s => `<div class="card" style="padding:10px 14px;margin-bottom:8px">
+        <div style="display:flex;gap:10px;align-items:center">
+          <span style="flex:1;font-size:0.85rem;color:var(--soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.body.slice(0,90))}…</span>
+          <button class="btn danger" onclick="delSample(${s.id})">Remove</button>
+        </div></div>`).join('')
+    : '<p style="color:var(--soft);font-size:0.88rem">No samples yet.</p>';
+  $('voiceDlg').showModal();
+}
+async function addSample(){
+  const body = $('newSample').value;
+  const r = await api('/api/voice/samples','POST',{body});
+  if (r.ok){ $('newSample').value=''; toast('Sample added'); openVoice(); }
+  else toast(r.detail || 'Could not add that sample');
+}
+async function delSample(id){ await api(`/api/voice/samples/${id}`,'DELETE'); openVoice(); }
+async function analyzeVoice(){
+  $('analyzeBtn').disabled = true; $('analyzeBtn').textContent = 'Analyzing…';
+  const r = await api('/api/voice/analyze','POST',{});
+  $('analyzeBtn').disabled = false; $('analyzeBtn').textContent = 'Analyze my voice';
+  if (r.ok){ $('profileBox').value = r.profile; toast('Voice profile updated — review and Save'); }
+  else toast('Analysis failed: ' + (r.message||''));
+}
+async function saveProfile(){
+  await api('/api/voice/profile','POST',{profile:$('profileBox').value});
+  $('voiceDlg').close(); toast('Voice profile saved');
 }
 async function discard(id){ await api(`/api/drafts/${id}/discard`,'POST',{}); refresh(); }
 async function ackErrors(){ await api(`/api/errors/${lastErrId}/ack`,'POST',{}); refresh(); }

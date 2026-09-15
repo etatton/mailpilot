@@ -125,6 +125,8 @@
     <input type="text" id="signature" placeholder="e.g. Sam">
     <label for="tone">Tone notes <span style="font-weight:400;color:var(--soft)">(optional but worth a sentence)</span></label>
     <textarea id="tone" placeholder="e.g. Friendly and brief. No corporate filler. Use first names."></textarea>
+    <label for="sample">Teach it your voice <span style="font-weight:400;color:var(--soft)">(optional — paste a real email you've written)</span></label>
+    <textarea id="sample" style="min-height:110px" placeholder="Paste one email you sent recently that sounds like you. Drafts will match its voice. You can add more samples later in Settings."></textarea>
     <details>
       <summary>Advanced</summary>
       <label for="ignore">Never draft for / never send to (comma-separated addresses or domains)</label>
@@ -221,6 +223,7 @@ async function finish() {
     app_password: $('appPassword').value,
     signature_name: $('signature').value,
     tone_notes: $('tone').value,
+    writing_sample: $('sample').value,
     ignore_senders: $('ignore').value,
     only_senders: $('only').value,
     poll_interval: $('interval').value,

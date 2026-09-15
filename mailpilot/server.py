@@ -125,6 +125,11 @@ async def setup_save(request: Request):
         config.set_secret("gmail_app_password", data["app_password"].replace(" ", ""))
     if mode == "api" and data.get("api_key"):
         config.set_secret("anthropic_api_key", data["api_key"].strip())
+    sample = (data.get("writing_sample") or "").strip()
+    if len(sample) >= 40:
+        with db.conn() as c:
+            c.execute("INSERT INTO voice_samples (body, created_at) VALUES (?,?)",
+                      (sample[:20000], db.now_iso()))
     autostart_msg = ""
     if data.get("autostart"):
         ok, autostart_msg = autostart.install()
@@ -258,6 +263,58 @@ def discard_draft(draft_id: int, request: Request):
             "UPDATE drafts SET status='discarded', updated_at=? WHERE id=? AND status='queued'",
             (db.now_iso(), draft_id),
         )
+    return {"ok": True}
+
+
+# ------------------------------------------------------------- voice
+
+@app.get("/api/voice")
+def voice():
+    with db.conn() as c:
+        rows = c.execute(
+            "SELECT id, body, created_at FROM voice_samples ORDER BY id DESC"
+        ).fetchall()
+    return {"samples": [dict(r) for r in rows], "profile": config.load().get("voice_profile", "")}
+
+
+@app.post("/api/voice/samples")
+async def add_sample(request: Request):
+    _require_header(request)
+    data = await request.json()
+    body = (data.get("body") or "").strip()
+    if len(body) < 40:
+        raise HTTPException(400, "A sample needs to be a real email - at least a few sentences.")
+    with db.conn() as c:
+        c.execute("INSERT INTO voice_samples (body, created_at) VALUES (?,?)",
+                  (body[:20000], db.now_iso()))
+    return {"ok": True}
+
+
+@app.delete("/api/voice/samples/{sample_id}")
+def delete_sample(sample_id: int, request: Request):
+    _require_header(request)
+    with db.conn() as c:
+        c.execute("DELETE FROM voice_samples WHERE id=?", (sample_id,))
+    return {"ok": True}
+
+
+@app.post("/api/voice/analyze")
+def analyze_voice(request: Request):
+    _require_header(request)
+    try:
+        profile = drafter.analyze_voice()
+    except Exception as e:
+        db.record_error("voice", str(e), traceback.format_exc())
+        return JSONResponse({"ok": False, "message": str(e)[:300]}, status_code=502)
+    config.update(voice_profile=profile)
+    return {"ok": True, "profile": profile}
+
+
+@app.post("/api/voice/profile")
+async def save_profile(request: Request):
+    _require_header(request)
+    data = await request.json()
+    config.update(voice_profile=(data.get("profile") or "").strip()[:4000])
     return {"ok": True}
 
 

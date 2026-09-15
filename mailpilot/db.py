@@ -32,6 +32,11 @@ CREATE TABLE IF NOT EXISTS drafts (
     updated_at TEXT,
     sent_at TEXT
 );
+CREATE TABLE IF NOT EXISTS voice_samples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    body TEXT NOT NULL,
+    created_at TEXT
+);
 CREATE TABLE IF NOT EXISTS errors (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source TEXT NOT NULL,

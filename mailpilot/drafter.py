@@ -25,12 +25,42 @@ FIXED_RULES = (
 )
 
 
-def build_system_prompt(cfg: dict) -> str:
+def _load_samples(db_file=None) -> list[str]:
+    from . import db
+    try:
+        with db.conn(db_file) as c:
+            rows = c.execute(
+                "SELECT body FROM voice_samples ORDER BY id DESC LIMIT 10"
+            ).fetchall()
+        return [r["body"] for r in rows]
+    except Exception:
+        return []
+
+
+def build_system_prompt(cfg: dict, samples: list[str] | None = None) -> str:
     parts = [
         f"You draft email replies on behalf of {cfg['signature_name']} <{cfg['gmail_address']}>."
     ]
     if cfg.get("tone_notes"):
         parts.append("Style guidance from the user: " + cfg["tone_notes"])
+    profile = (cfg.get("voice_profile") or "").strip()
+    if profile:
+        parts.append("Voice profile - how this person writes; follow it closely:\n" + profile)
+    samples = samples if samples is not None else _load_samples()
+    if samples:
+        # With a profile, one short exemplar is enough; without, give more raw material
+        budget = 1500 if profile else 6000
+        joined = ""
+        for s in samples:
+            s = (s or "").strip()[:3000]
+            if not s or len(joined) + len(s) > budget:
+                continue
+            joined += "\n\n--- SAMPLE ---\n" + s
+        if joined:
+            parts.append(
+                "Real emails the user has written. Match their voice, rhythm, and sign-off:"
+                + joined
+            )
     parts.append(FIXED_RULES.format(signature=cfg["signature_name"]))
     return "\n\n".join(parts)
 
@@ -157,12 +187,43 @@ def _draft_via_cli(system_prompt: str, user_prompt: str, cfg: dict) -> str:
     return text
 
 
-# ---------------------------------------------------------------- entry point
+# ---------------------------------------------------------------- entry points
 
-def draft_reply(email_row, cfg: dict = None, guidance: str = "", previous_draft: str = "") -> str:
-    cfg = cfg or config.load()
-    system_prompt = build_system_prompt(cfg)
-    user_prompt = build_user_prompt(email_row, guidance, previous_draft)
+def generate(system_prompt: str, user_prompt: str, cfg: dict) -> str:
     if cfg.get("mode") == "cli":
         return _draft_via_cli(system_prompt, user_prompt, cfg)
     return _draft_via_api(system_prompt, user_prompt, cfg)
+
+
+def draft_reply(email_row, cfg: dict = None, guidance: str = "", previous_draft: str = "") -> str:
+    cfg = cfg or config.load()
+    return generate(
+        build_system_prompt(cfg),
+        build_user_prompt(email_row, guidance, previous_draft),
+        cfg,
+    )
+
+
+def analyze_voice(cfg: dict = None, db_file=None) -> str:
+    """Distill the stored writing samples into a compact, editable voice profile."""
+    cfg = cfg or config.load()
+    samples = _load_samples(db_file)
+    if not samples:
+        raise RuntimeError("Add at least one writing sample first.")
+    joined = ""
+    for s in samples:
+        if len(joined) > 15000:
+            break
+        joined += "\n\n--- SAMPLE ---\n" + s.strip()[:4000]
+    system = (
+        "You analyze how a person writes email and produce a compact voice profile "
+        "another writer can follow to imitate them."
+    )
+    user = (
+        "Here are emails written by one person. Write their voice profile in under 180 "
+        "words: typical greeting and sign-off, sentence length and rhythm, formality, "
+        "warmth, punctuation and formatting habits, characteristic words or phrases, and "
+        "anything they never do. Output ONLY the profile, as short plain-text bullet lines."
+        + joined
+    )
+    return generate(system, user, cfg).strip()

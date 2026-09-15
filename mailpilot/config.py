@@ -23,6 +23,7 @@ DEFAULTS = {
     "gmail_address": "",
     "signature_name": "",
     "tone_notes": "",
+    "voice_profile": "",
     "ignore_senders": [],
     "only_senders": [],
     "poll_interval": 300,
