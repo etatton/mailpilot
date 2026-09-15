@@ -36,6 +36,14 @@ def main():
     parser.add_argument("--port", type=int, default=0)
     args = parser.parse_args()
 
+    # In a windowed (--noconsole) build stdout/stderr are None; anything that
+    # writes to them (uvicorn's log handlers included) would die. Point both
+    # at the log file before any server code runs.
+    if sys.stdout is None or sys.stderr is None:
+        stream = open(paths.log_path(), "a", buffering=1, encoding="utf-8", errors="replace")
+        sys.stdout = sys.stdout or stream
+        sys.stderr = sys.stderr or stream
+
     logging.basicConfig(
         filename=str(paths.log_path()), level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",

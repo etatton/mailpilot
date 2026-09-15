@@ -50,11 +50,23 @@ jobs:
         shell: pwsh
         run: |
           Start-Process -FilePath "dist\MailPilot.exe" -ArgumentList "--headless","--port","8765"
-          Start-Sleep -Seconds 12
-          $r = Invoke-WebRequest -Uri "http://127.0.0.1:8765/api/ping" -UseBasicParsing
-          if ($r.Content -notmatch "mailpilot") { exit 1 }
+          $ok = $false
+          foreach ($i in 1..30) {   # onefile extraction + Defender scan can take a while
+            Start-Sleep -Seconds 5
+            try {
+              $r = Invoke-WebRequest -Uri "http://127.0.0.1:8765/api/ping" -UseBasicParsing -TimeoutSec 5
+              if ($r.Content -match "mailpilot") { $ok = $true; break }
+            } catch { }
+          }
+          if (-not $ok) {
+            Write-Host "--- server never answered; app log follows ---"
+            $log = Join-Path $env:APPDATA "MailPilot\mailpilot.log"
+            if (Test-Path $log) { Get-Content $log } else { Write-Host "(no log file at $log)" }
+            exit 1
+          }
           $w = Invoke-WebRequest -Uri "http://127.0.0.1:8765/" -UseBasicParsing
           if ($w.Content -notmatch "MailPilot") { exit 1 }
+          Write-Host "Windows smoke test passed."
       - uses: actions/upload-artifact@v4
         with:
           name: MailPilot-windows
