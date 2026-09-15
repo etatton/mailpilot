@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set up MailPilot</title>
+<style>
+  :root {
+    --paper:#f4f6f7; --surface:#ffffff; --ink:#1a2732; --soft:#4c5b68;
+    --line:#d8dfe4; --accent:#0e7490; --accent-ink:#0b5d74; --accent-soft:#e3f1f5;
+    --ok:#1a7f37; --err:#b42318; --warn-bg:#faf1dc; --warn-ink:#6d5313;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:#10161c; --surface:#171f27; --ink:#dbe3ea; --soft:#93a3b1;
+      --line:#2a3641; --accent:#4cbcd2; --accent-ink:#6fd0e2; --accent-soft:#12303a;
+      --ok:#4ade80; --err:#f87171; --warn-bg:#2c2410; --warn-ink:#e2c479;
+    }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--paper); color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif; font-size:16px; line-height:1.55; }
+  .wrap { max-width:640px; margin:0 auto; padding:40px 20px 80px; }
+  h1 { font-size:1.7rem; margin:0 0 4px; }
+  h2 { font-size:1.2rem; margin:0 0 10px; }
+  p { margin:0 0 12px; color:var(--soft); }
+  .card { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:24px; margin-top:18px; }
+  .progress { display:flex; gap:6px; margin:18px 0 0; }
+  .progress span { flex:1; height:4px; border-radius:2px; background:var(--line); }
+  .progress span.on { background:var(--accent); }
+  label { display:block; font-weight:600; font-size:0.9rem; margin:14px 0 4px; color:var(--ink); }
+  input[type=text], input[type=password], input[type=email], input[type=number], textarea {
+    width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px;
+    background:var(--paper); color:var(--ink); font-size:1rem; font-family:inherit; }
+  textarea { min-height:80px; resize:vertical; }
+  input:focus, textarea:focus { outline:2px solid var(--accent); outline-offset:1px; }
+  .btn { display:inline-block; border:none; border-radius:8px; padding:11px 20px; font-size:1rem;
+    font-weight:600; cursor:pointer; background:var(--accent); color:#fff; }
+  .btn.secondary { background:transparent; color:var(--accent-ink); border:1px solid var(--accent); }
+  .btn:disabled { opacity:0.45; cursor:default; }
+  .btn:focus-visible { outline:2px solid var(--ink); outline-offset:2px; }
+  .row { display:flex; gap:10px; justify-content:space-between; margin-top:22px; flex-wrap:wrap; }
+  .choice { border:2px solid var(--line); border-radius:10px; padding:16px; margin-top:12px; cursor:pointer; }
+  .choice.sel { border-color:var(--accent); background:var(--accent-soft); }
+  .choice h3 { margin:0 0 4px; font-size:1.02rem; }
+  .choice p { margin:0; font-size:0.9rem; }
+  .status { margin-top:10px; padding:10px 14px; border-radius:8px; font-size:0.92rem; display:none; }
+  .status.ok { display:block; background:var(--accent-soft); color:var(--ok); }
+  .status.err { display:block; background:var(--warn-bg); color:var(--err); }
+  .hint { font-size:0.85rem; color:var(--soft); margin-top:4px; }
+  .linkbtns { display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 4px; }
+  a { color:var(--accent-ink); }
+  .check { display:flex; gap:10px; align-items:flex-start; margin-top:14px; }
+  .check input { margin-top:5px; }
+  details { margin-top:14px; } summary { cursor:pointer; color:var(--accent-ink); font-weight:600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Welcome to MailPilot</h1>
+  <p>Your inbox copilot: it watches your Gmail, drafts replies with Claude, and sends only what you approve. Setup takes about five minutes.</p>
+  <div class="progress" id="progress"></div>
+
+  <!-- STEP 0: brain -->
+  <div class="card step" id="step0">
+    <h2>1 · How should MailPilot think?</h2>
+    <p>Pick how drafts get written. You can change this later in Settings.</p>
+
+    <div class="choice" id="chApi" onclick="pickMode('api')">
+      <h3>Use an Anthropic API key <span style="font-weight:400;color:var(--soft)">— simplest</span></h3>
+      <p>Pay-as-you-go; a typical reply costs about a cent. Create a key at
+         <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.</p>
+      <div id="apiFields" style="display:none">
+        <label for="apiKey">API key</label>
+        <input type="password" id="apiKey" placeholder="sk-ant-...">
+        <button class="btn secondary" style="margin-top:10px" onclick="event.stopPropagation();validateKey()">Test key</button>
+        <div class="status" id="keyStatus"></div>
+        <label>Draft quality</label>
+        <label style="font-weight:400"><input type="radio" name="model" value="claude-opus-5" checked> Best quality (Claude Opus)</label>
+        <label style="font-weight:400"><input type="radio" name="model" value="claude-sonnet-5"> Faster &amp; cheaper (Claude Sonnet)</label>
+      </div>
+    </div>
+
+    <div class="choice" id="chCli" onclick="pickMode('cli')">
+      <h3>Use my Claude subscription</h3>
+      <p>Uses the Claude Code app already installed and signed in on this computer — no separate billing.</p>
+      <div id="cliFields" style="display:none">
+        <div class="status" id="cliStatus"></div>
+        <div class="linkbtns">
+          <button class="btn secondary" onclick="event.stopPropagation();detectClaude()">Check again</button>
+          <a class="btn secondary" style="text-decoration:none" href="https://claude.com/claude-code" target="_blank" rel="noopener">Install Claude Code</a>
+        </div>
+        <p class="hint">Install it, sign in with your Claude account once, then hit “Check again”.</p>
+      </div>
+    </div>
+
+    <div class="row"><span></span><button class="btn" id="next0" disabled onclick="go(1)">Continue</button></div>
+  </div>
+
+  <!-- STEP 1: gmail -->
+  <div class="card step" id="step1" hidden>
+    <h2>2 · Connect your Gmail</h2>
+    <p>MailPilot signs in with an <strong>app password</strong> — a special 16-character password Google issues for one app. Your real password is never used or stored.</p>
+    <div class="linkbtns">
+      <a class="btn secondary" style="text-decoration:none" href="https://myaccount.google.com/signinoptions/twosv" target="_blank" rel="noopener">1. Turn on 2-Step Verification</a>
+      <a class="btn secondary" style="text-decoration:none" href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">2. Create app password</a>
+    </div>
+    <p class="hint">On the app-passwords page, name it “MailPilot” and copy the 16-character code it shows.</p>
+    <label for="gmail">Gmail address</label>
+    <input type="email" id="gmail" placeholder="you@gmail.com" autocomplete="off">
+    <label for="appPassword">App password</label>
+    <input type="password" id="appPassword" placeholder="xxxx xxxx xxxx xxxx" autocomplete="off">
+    <button class="btn secondary" style="margin-top:12px" onclick="validateGmail()">Test connection</button>
+    <div class="status" id="gmailStatus"></div>
+    <div class="row">
+      <button class="btn secondary" onclick="go(0)">Back</button>
+      <button class="btn" id="next1" disabled onclick="go(2)">Continue</button>
+    </div>
+  </div>
+
+  <!-- STEP 2: voice -->
+  <div class="card step" id="step2" hidden>
+    <h2>3 · Your voice</h2>
+    <label for="signature">Sign replies as</label>
+    <input type="text" id="signature" placeholder="e.g. Sam">
+    <label for="tone">Tone notes <span style="font-weight:400;color:var(--soft)">(optional but worth a sentence)</span></label>
+    <textarea id="tone" placeholder="e.g. Friendly and brief. No corporate filler. Use first names."></textarea>
+    <details>
+      <summary>Advanced</summary>
+      <label for="ignore">Never draft for / never send to (comma-separated addresses or domains)</label>
+      <input type="text" id="ignore" placeholder="newsletters@example.com, spammy-domain.com">
+      <label for="only">ONLY draft for these senders (leave empty for everyone)</label>
+      <input type="text" id="only" placeholder="">
+      <label for="interval">Check for new mail every (seconds)</label>
+      <input type="number" id="interval" value="300" min="60">
+    </details>
+    <div class="row">
+      <button class="btn secondary" onclick="go(1)">Back</button>
+      <button class="btn" id="next2" onclick="go(3)">Continue</button>
+    </div>
+  </div>
+
+  <!-- STEP 3: finish -->
+  <div class="card step" id="step3" hidden>
+    <h2>4 · Ready for takeoff</h2>
+    <p>MailPilot starts in <strong>test mode</strong>: drafts appear and you can approve them, but nothing is actually sent until you flip the Live switch — do that after your first practice approval.</p>
+    <div class="check">
+      <input type="checkbox" id="autostart" checked>
+      <label for="autostart" style="margin:0; font-weight:400">Start MailPilot automatically when this computer starts, and restart it if it ever crashes <span class="hint">(recommended)</span></label>
+    </div>
+    <div class="status" id="saveStatus"></div>
+    <div class="row">
+      <button class="btn secondary" onclick="go(2)">Back</button>
+      <button class="btn" id="finishBtn" onclick="finish()">Finish setup</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const api = (path, method, body) => fetch(path, {
+  method: method || 'GET',
+  headers: {'Content-Type':'application/json','X-MailPilot':'1'},
+  body: body ? JSON.stringify(body) : undefined,
+}).then(r => r.json());
+
+let mode = null, keyOk = false, cliOk = false, gmailOk = false, step = 0;
+const STEPS = 4;
+$('progress').innerHTML = Array.from({length:STEPS}, () => '<span></span>').join('');
+
+function paint() {
+  document.querySelectorAll('.step').forEach((el,i) => el.hidden = i !== step);
+  document.querySelectorAll('#progress span').forEach((el,i) => el.classList.toggle('on', i <= step));
+  window.scrollTo(0,0);
+}
+function go(n) { step = n; paint(); }
+
+function pickMode(m) {
+  mode = m;
+  $('chApi').classList.toggle('sel', m==='api');
+  $('chCli').classList.toggle('sel', m==='cli');
+  $('apiFields').style.display = m==='api' ? 'block' : 'none';
+  $('cliFields').style.display = m==='cli' ? 'block' : 'none';
+  if (m==='cli') detectClaude();
+  updateNext0();
+}
+function updateNext0() {
+  $('next0').disabled = !(mode==='api' ? keyOk : mode==='cli' ? cliOk : false);
+}
+async function validateKey() {
+  const s = $('keyStatus'); s.className='status'; s.textContent='Checking…'; s.style.display='block';
+  const r = await api('/api/setup/validate-key','POST',{key:$('apiKey').value});
+  keyOk = r.ok; s.className = 'status ' + (r.ok?'ok':'err'); s.textContent = r.message;
+  updateNext0();
+}
+async function detectClaude() {
+  const s = $('cliStatus'); s.className='status'; s.textContent='Looking for Claude Code…'; s.style.display='block';
+  const r = await api('/api/setup/detect-claude');
+  cliOk = r.found;
+  s.className = 'status ' + (r.found?'ok':'err');
+  s.textContent = r.found
+    ? 'Claude Code found (' + r.path + '). Make sure you\'ve signed in to it at least once.'
+    : 'Claude Code isn\'t installed (or not on this account). Install it, sign in, then check again.';
+  updateNext0();
+}
+async function validateGmail() {
+  const s = $('gmailStatus'); s.className='status'; s.textContent='Signing in to Gmail…'; s.style.display='block';
+  const r = await api('/api/setup/validate-gmail','POST',{email:$('gmail').value, app_password:$('appPassword').value});
+  gmailOk = r.ok; s.className='status '+(r.ok?'ok':'err'); s.textContent = r.message;
+  $('next1').disabled = !r.ok;
+}
+async function finish() {
+  if (!$('signature').value.trim()) { go(2); $('signature').focus(); return; }
+  $('finishBtn').disabled = true;
+  const s = $('saveStatus'); s.className='status'; s.textContent='Saving…'; s.style.display='block';
+  const r = await api('/api/setup/save','POST',{
+    mode,
+    api_key: $('apiKey').value,
+    model: (document.querySelector('input[name=model]:checked')||{}).value,
+    gmail_address: $('gmail').value,
+    app_password: $('appPassword').value,
+    signature_name: $('signature').value,
+    tone_notes: $('tone').value,
+    ignore_senders: $('ignore').value,
+    only_senders: $('only').value,
+    poll_interval: $('interval').value,
+    autostart: $('autostart').checked,
+  });
+  if (r.ok) {
+    s.className='status ok';
+    s.textContent = 'All set. ' + (r.autostart_message || '') + ' Opening your dashboard…';
+    setTimeout(() => location.href = '/', 1200);
+  } else {
+    s.className='status err'; s.textContent='Something went wrong saving setup.'; $('finishBtn').disabled=false;
+  }
+}
+paint();
+</script>
+</body>
+</html>

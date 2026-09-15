@@ -1,0 +1,113 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Import check
+        run: python -c "import app; import mailpilot.server, mailpilot.poller, mailpilot.drafter, mailpilot.sender, mailpilot.autostart, mailpilot.config, mailpilot.db"
+      - name: Guard self-test
+        run: python scripts/selftest.py
+
+  build-windows:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt pyinstaller pillow
+      - run: python scripts/make_icon.py
+      - name: Build exe
+        run: >
+          pyinstaller --noconfirm --onefile --noconsole --name MailPilot
+          --icon build/icon.ico
+          --add-data "web;web"
+          --hidden-import uvicorn.logging
+          --hidden-import uvicorn.loops.auto
+          --hidden-import uvicorn.protocols.http.auto
+          --hidden-import uvicorn.protocols.websockets.auto
+          --hidden-import uvicorn.lifespan.on
+          --hidden-import keyring.backends.Windows
+          app.py
+      - name: Smoke test exe
+        shell: pwsh
+        run: |
+          Start-Process -FilePath "dist\MailPilot.exe" -ArgumentList "--headless","--port","8765"
+          Start-Sleep -Seconds 12
+          $r = Invoke-WebRequest -Uri "http://127.0.0.1:8765/api/ping" -UseBasicParsing
+          if ($r.Content -notmatch "mailpilot") { exit 1 }
+          $w = Invoke-WebRequest -Uri "http://127.0.0.1:8765/" -UseBasicParsing
+          if ($w.Content -notmatch "MailPilot") { exit 1 }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MailPilot-windows
+          path: dist/MailPilot.exe
+
+  build-macos:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt pyinstaller
+      - name: Build app bundle
+        run: >
+          pyinstaller --noconfirm --windowed --name MailPilot
+          --add-data "web:web"
+          --hidden-import uvicorn.logging
+          --hidden-import uvicorn.loops.auto
+          --hidden-import uvicorn.protocols.http.auto
+          --hidden-import uvicorn.protocols.websockets.auto
+          --hidden-import uvicorn.lifespan.on
+          --hidden-import keyring.backends.macOS
+          app.py
+      - name: Ad-hoc sign
+        run: codesign --force --deep -s - dist/MailPilot.app
+      - name: Smoke test binary
+        run: |
+          ./dist/MailPilot.app/Contents/MacOS/MailPilot --headless --port 8765 &
+          sleep 12
+          curl -sf http://127.0.0.1:8765/api/ping | grep -q mailpilot
+          curl -sf http://127.0.0.1:8765/ | grep -q MailPilot
+      - name: Zip app
+        run: ditto -c -k --keepParent dist/MailPilot.app dist/MailPilot-mac.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MailPilot-mac
+          path: dist/MailPilot-mac.zip
+
+  release:
+    needs: [build-windows, build-macos]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/MailPilot.exe
+            dist/MailPilot-mac.zip
+          generate_release_notes: true

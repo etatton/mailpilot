@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MailPilot</title>
+<style>
+  :root {
+    --paper:#f4f6f7; --surface:#ffffff; --ink:#1a2732; --soft:#4c5b68;
+    --line:#d8dfe4; --accent:#0e7490; --accent-ink:#0b5d74; --accent-soft:#e3f1f5;
+    --ok:#1a7f37; --err:#b42318; --err-bg:#fbe9e7; --warn-bg:#faf1dc; --warn-ink:#6d5313;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:#10161c; --surface:#171f27; --ink:#dbe3ea; --soft:#93a3b1;
+      --line:#2a3641; --accent:#4cbcd2; --accent-ink:#6fd0e2; --accent-soft:#12303a;
+      --ok:#4ade80; --err:#f87171; --err-bg:#3a1512; --warn-bg:#2c2410; --warn-ink:#e2c479;
+    }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--paper); color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif; font-size:15.5px; line-height:1.5; }
+  header { background:var(--surface); border-bottom:1px solid var(--line);
+    padding:12px 20px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  header h1 { font-size:1.15rem; margin:0; }
+  .pill { font-size:0.75rem; font-weight:700; letter-spacing:0.05em; padding:3px 10px; border-radius:999px; }
+  .pill.test { background:var(--warn-bg); color:var(--warn-ink); }
+  .pill.live { background:var(--accent-soft); color:var(--ok); }
+  .spacer { flex:1; }
+  .btn { border:none; border-radius:8px; padding:8px 14px; font-size:0.9rem; font-weight:600;
+    cursor:pointer; background:var(--accent); color:#fff; }
+  .btn.secondary { background:transparent; color:var(--accent-ink); border:1px solid var(--accent); }
+  .btn.danger { background:transparent; color:var(--err); border:1px solid var(--err); }
+  .btn:disabled { opacity:0.45; cursor:default; }
+  .btn:focus-visible { outline:2px solid var(--ink); outline-offset:2px; }
+  .banner { padding:10px 20px; font-size:0.92rem; display:flex; gap:12px; align-items:center; }
+  .banner.err { background:var(--err-bg); color:var(--err); }
+  .banner.warn { background:var(--warn-bg); color:var(--warn-ink); }
+  main { max-width:860px; margin:0 auto; padding:20px; }
+  .tabs { display:flex; gap:4px; border-bottom:1px solid var(--line); margin-bottom:16px; }
+  .tab { background:none; border:none; padding:10px 16px; font-size:0.95rem; cursor:pointer;
+    color:var(--soft); border-bottom:2px solid transparent; font-weight:600; }
+  .tab.on { color:var(--accent-ink); border-bottom-color:var(--accent); }
+  .card { background:var(--surface); border:1px solid var(--line); border-radius:12px;
+    padding:18px 20px; margin-bottom:14px; }
+  .meta { display:flex; gap:10px; flex-wrap:wrap; align-items:baseline; margin-bottom:8px; }
+  .meta strong { font-size:1rem; }
+  .meta .sub { color:var(--soft); font-size:0.85rem; }
+  details.orig { margin:8px 0; }
+  details.orig summary { cursor:pointer; color:var(--accent-ink); font-size:0.88rem; font-weight:600; }
+  details.orig pre { white-space:pre-wrap; font-family:inherit; font-size:0.9rem; color:var(--soft);
+    background:var(--paper); border:1px solid var(--line); border-radius:8px; padding:12px; max-height:260px; overflow:auto; }
+  textarea.draft { width:100%; min-height:140px; padding:12px; border:1px solid var(--line);
+    border-radius:8px; background:var(--paper); color:var(--ink); font-size:0.97rem;
+    font-family:inherit; line-height:1.5; resize:vertical; }
+  textarea.draft:focus { outline:2px solid var(--accent); outline-offset:1px; }
+  .actions { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+  .empty { text-align:center; color:var(--soft); padding:50px 20px; }
+  .status-chip { font-size:0.72rem; font-weight:700; padding:2px 8px; border-radius:999px; text-transform:uppercase; letter-spacing:0.04em; }
+  .st-sent { background:var(--accent-soft); color:var(--ok); }
+  .st-simulated { background:var(--warn-bg); color:var(--warn-ink); }
+  .st-discarded, .st-blocked { background:var(--err-bg); color:var(--err); }
+  dialog { border:1px solid var(--line); border-radius:12px; background:var(--surface); color:var(--ink);
+    max-width:520px; width:92%; padding:22px; }
+  dialog::backdrop { background:rgba(0,0,0,0.45); }
+  dialog label { display:block; font-weight:600; font-size:0.88rem; margin:12px 0 4px; }
+  dialog input, dialog textarea, dialog select { width:100%; padding:9px 11px; border:1px solid var(--line);
+    border-radius:8px; background:var(--paper); color:var(--ink); font-size:0.95rem; font-family:inherit; }
+  .toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:var(--ink);
+    color:var(--paper); padding:10px 18px; border-radius:8px; font-size:0.9rem; opacity:0; transition:opacity .2s; }
+  .toast.show { opacity:1; }
+  .foot { color:var(--soft); font-size:0.8rem; text-align:center; padding:20px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📬 MailPilot</h1>
+  <span class="pill" id="modePill"></span>
+  <span class="spacer"></span>
+  <span class="sub" id="lastPoll" style="color:var(--soft);font-size:0.82rem"></span>
+  <button class="btn secondary" onclick="pollNow()">Check mail now</button>
+  <button class="btn secondary" onclick="openSettings()">Settings</button>
+</header>
+<div class="banner err" id="errBanner" hidden>
+  <span id="errText" style="flex:1"></span>
+  <button class="btn danger" onclick="ackErrors()">Acknowledge</button>
+</div>
+<div class="banner warn" id="testBanner" hidden>
+  <span style="flex:1">TEST MODE — approvals are simulated, nothing is sent. Approve one practice draft, then go live in Settings.</span>
+</div>
+
+<main>
+  <div class="tabs">
+    <button class="tab on" data-tab="queue" onclick="setTab('queue')">Queue <span id="qCount"></span></button>
+    <button class="tab" data-tab="history" onclick="setTab('history')">History</button>
+    <button class="tab" data-tab="skipped" onclick="setTab('skipped')">Skipped</button>
+  </div>
+  <div id="content"><div class="empty">Loading…</div></div>
+</main>
+<div class="foot">Every reply passes through your hands. MailPilot never sends without your approval.</div>
+
+<dialog id="settingsDlg">
+  <h2 style="margin:0 0 6px;font-size:1.15rem">Settings</h2>
+  <label style="display:flex;gap:10px;align-items:center;font-size:1rem;margin-top:14px">
+    <input type="checkbox" id="setLive" style="width:auto"> Live sending (off = test mode)
+  </label>
+  <label style="display:flex;gap:10px;align-items:center;font-size:1rem">
+    <input type="checkbox" id="setAutostart" style="width:auto"> Start with the computer &amp; restart on crash
+  </label>
+  <label for="setSignature">Sign replies as</label>
+  <input type="text" id="setSignature">
+  <label for="setTone">Tone notes</label>
+  <textarea id="setTone" rows="3"></textarea>
+  <label for="setIgnore">Never draft for / send to</label>
+  <input type="text" id="setIgnore" placeholder="comma-separated addresses or domains">
+  <label for="setOnly">Only draft for (empty = everyone)</label>
+  <input type="text" id="setOnly">
+  <label for="setInterval">Check every (seconds)</label>
+  <input type="number" id="setInterval" min="60">
+  <details style="margin-top:14px"><summary style="cursor:pointer;color:var(--accent-ink);font-weight:600">Update credentials</summary>
+    <label for="setAppPw">New Gmail app password</label>
+    <input type="password" id="setAppPw" placeholder="leave blank to keep current">
+    <label for="setApiKey">New Anthropic API key</label>
+    <input type="password" id="setApiKey" placeholder="leave blank to keep current">
+  </details>
+  <div class="actions" style="margin-top:18px;justify-content:space-between">
+    <button class="btn danger" onclick="quitApp()">Quit MailPilot</button>
+    <span>
+      <button class="btn secondary" onclick="document.getElementById('settingsDlg').close()">Cancel</button>
+      <button class="btn" onclick="saveSettings()">Save</button>
+    </span>
+  </div>
+</dialog>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const api = (path, method, body) => fetch(path, {
+  method: method||'GET',
+  headers:{'Content-Type':'application/json','X-MailPilot':'1'},
+  body: body ? JSON.stringify(body) : undefined,
+}).then(r => r.json());
+let tab='queue', state={}, lastErrId=0;
+
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2600); }
+function fmtTime(iso){ if(!iso) return ''; try{ return new Date(iso).toLocaleString(); }catch(e){ return iso; } }
+
+async function refresh(){
+  state = await api('/api/state');
+  $('modePill').className = 'pill ' + (state.live_send?'live':'test');
+  $('modePill').textContent = state.live_send ? 'LIVE' : 'TEST MODE';
+  $('testBanner').hidden = !!state.live_send;
+  $('lastPoll').textContent = state.last_poll ? ('Last check: ' + fmtTime(state.last_poll)) : 'First check pending…';
+  const errs = await api('/api/errors');
+  if (errs.errors.length){
+    lastErrId = errs.errors[0].id;
+    $('errText').textContent = `${errs.errors.length} problem${errs.errors.length>1?'s':''} — newest: [${errs.errors[0].source}] ${errs.errors[0].message}`;
+    $('errBanner').hidden = false;
+  } else $('errBanner').hidden = true;
+  render();
+}
+
+function setTab(t){ tab=t;
+  document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('on', b.dataset.tab===t));
+  render(); }
+
+async function render(){
+  const box = $('content');
+  if (tab==='queue'){
+    const d = await api('/api/queue');
+    $('qCount').textContent = d.drafts.length ? '('+d.drafts.length+')' : '';
+    if (!d.drafts.length){ box.innerHTML = '<div class="empty">Queue is clear. New drafts appear here after each mail check.</div>'; return; }
+    box.innerHTML = d.drafts.map(x => `
+      <div class="card" id="card${x.id}">
+        <div class="meta"><strong>${esc(x.from_name||x.from_address)}</strong>
+          <span class="sub">${esc(x.from_address)}</span>
+          <span class="sub">· ${fmtTime(x.received_at)}</span></div>
+        <div style="font-weight:600;margin-bottom:6px">${esc(x.subject)||'(no subject)'}</div>
+        <details class="orig"><summary>Show original email</summary><pre>${esc(x.body_text)}</pre></details>
+        <textarea class="draft" id="body${x.id}">${esc(x.body)}</textarea>
+        <div class="actions">
+          <button class="btn" onclick="approve(${x.id})">Approve &amp; Send</button>
+          <button class="btn secondary" onclick="regen(${x.id})">Regenerate…</button>
+          <button class="btn danger" onclick="discard(${x.id})">Discard</button>
+        </div>
+      </div>`).join('');
+  } else if (tab==='history'){
+    const d = await api('/api/history');
+    if (!d.drafts.length){ box.innerHTML = '<div class="empty">Nothing here yet.</div>'; return; }
+    box.innerHTML = d.drafts.map(x => `
+      <div class="card">
+        <div class="meta">
+          <span class="status-chip st-${x.status}">${x.status}${x.block_reason?': '+esc(x.block_reason):''}</span>
+          <strong>${esc(x.from_name||x.from_address)}</strong>
+          <span class="sub">${esc(x.subject)||'(no subject)'} · ${fmtTime(x.updated_at)}</span></div>
+        <details class="orig"><summary>Show reply</summary><pre>${esc(x.body)}</pre></details>
+      </div>`).join('');
+  } else {
+    const d = await api('/api/skipped');
+    if (!d.emails.length){ box.innerHTML = '<div class="empty">Nothing skipped yet. Bulk mail, no-reply senders, and your ignore list land here.</div>'; return; }
+    box.innerHTML = d.emails.map(x => `
+      <div class="card">
+        <div class="meta"><span class="status-chip st-simulated">${esc(x.skip_reason)}</span>
+          <strong>${esc(x.from_name||x.from_address)}</strong>
+          <span class="sub">${esc(x.subject)||'(no subject)'} · ${fmtTime(x.received_at)}</span></div>
+      </div>`).join('');
+  }
+}
+
+async function approve(id){
+  const body = $('body'+id).value;
+  const btns = document.querySelectorAll(`#card${id} .btn`); btns.forEach(b=>b.disabled=true);
+  const r = await api(`/api/drafts/${id}/approve`,'POST',{body});
+  if (r.status==='sent') toast('Reply sent to ' + r.recipient);
+  else if (r.status==='simulated') toast('Simulated (test mode) — nothing was sent');
+  else toast('Blocked: ' + (r.reason||'unknown'));
+  refresh();
+}
+async function regen(id){
+  const guidance = prompt('Any guidance for the new draft? (leave empty to just retry)') ;
+  if (guidance===null) return;
+  toast('Redrafting…');
+  const r = await api(`/api/drafts/${id}/regenerate`,'POST',{guidance});
+  if (r.ok===false) toast('Redraft failed: ' + r.message);
+  refresh();
+}
+async function discard(id){ await api(`/api/drafts/${id}/discard`,'POST',{}); refresh(); }
+async function ackErrors(){ await api(`/api/errors/${lastErrId}/ack`,'POST',{}); refresh(); }
+async function pollNow(){ await api('/api/poll-now','POST',{}); toast('Checking mail…'); setTimeout(refresh, 4000); }
+
+function openSettings(){
+  $('setLive').checked = !!state.live_send;
+  $('setAutostart').checked = !!state.autostart_installed;
+  $('setSignature').value = state.signature_name||'';
+  $('setTone').value = state.tone_notes||'';
+  $('setIgnore').value = (state.ignore_senders||[]).join(', ');
+  $('setOnly').value = (state.only_senders||[]).join(', ');
+  $('setInterval').value = state.poll_interval||300;
+  $('setAppPw').value=''; $('setApiKey').value='';
+  $('settingsDlg').showModal();
+}
+async function saveSettings(){
+  await api('/api/settings','POST',{
+    signature_name:$('setSignature').value, tone_notes:$('setTone').value,
+    ignore_senders:$('setIgnore').value, only_senders:$('setOnly').value,
+    poll_interval:$('setInterval').value,
+    app_password:$('setAppPw').value, api_key:$('setApiKey').value,
+  });
+  if (!!state.live_send !== $('setLive').checked)
+    await api('/api/live','POST',{on:$('setLive').checked});
+  if (!!state.autostart_installed !== $('setAutostart').checked){
+    const r = await api('/api/autostart','POST',{install:$('setAutostart').checked});
+    toast(r.message||'');
+  }
+  $('settingsDlg').close(); refresh();
+}
+async function quitApp(){
+  if (!confirm('Quit MailPilot? Mail watching stops until it starts again.')) return;
+  await api('/api/quit','POST',{});
+  document.body.innerHTML = '<div class="empty" style="padding-top:120px">MailPilot has shut down. You can close this tab.</div>';
+}
+
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>
