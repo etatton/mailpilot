@@ -1,0 +1,13 @@
+# Secrets and local state never enter git
+.env
+*.env
+data/
+build/
+dist/
+*.spec.bak
+__pycache__/
+*.pyc
+venv/
+.venv/
+*.log
+.DS_Store
