@@ -170,22 +170,78 @@ def validate_api_key(key: str) -> tuple[bool, str]:
 
 # ---------------------------------------------------------------- cli mode
 
-_CLI_CANDIDATES = [
-    Path.home() / ".local" / "bin" / "claude",
-    Path.home() / ".local" / "bin" / "claude.exe",
-    Path("/usr/local/bin/claude"),
-    Path("/opt/homebrew/bin/claude"),
-]
+def _wsl_find_claude() -> str:
+    """Windows only: Claude Code installed inside WSL is invisible to a native
+    exe's filesystem - ask WSL itself. A hit returns 'wsl:<linux path>', which
+    _draft_via_cli knows how to invoke. Login shell (-lc) so ~/.local/bin from
+    the user's profile is on PATH."""
+    try:
+        r = subprocess.run(
+            ["wsl", "-e", "sh", "-lc", "command -v claude"],
+            capture_output=True, text=True, timeout=25,
+            creationflags=0x08000000,
+        )
+        path = (r.stdout or "").strip().splitlines()[-1] if r.returncode == 0 and r.stdout.strip() else ""
+        return f"wsl:{path}" if path.startswith("/") else ""
+    except Exception:
+        return ""
 
 
 def find_claude_cli() -> str:
-    hit = shutil.which("claude")
-    if hit:
-        return hit
-    for p in _CLI_CANDIDATES:
+    import os
+    for name in ("claude", "claude.exe", "claude.cmd"):
+        hit = shutil.which(name)
+        if hit:
+            return hit
+    home = Path.home()
+    candidates = [
+        home / ".local" / "bin" / "claude",
+        home / ".local" / "bin" / "claude.exe",
+        Path("/usr/local/bin/claude"),
+        Path("/opt/homebrew/bin/claude"),
+    ]
+    if sys.platform == "win32":
+        # A double-clicked exe's PATH is whatever the registry had at logon -
+        # check the known install homes directly.
+        appdata = os.environ.get("APPDATA", "")
+        localapp = os.environ.get("LOCALAPPDATA", "")
+        if appdata:
+            candidates.append(Path(appdata) / "npm" / "claude.cmd")
+        if localapp:
+            candidates.append(Path(localapp) / "Programs" / "claude" / "claude.exe")
+    for p in candidates:
         if p.exists():
             return str(p)
+    if sys.platform == "win32":
+        return _wsl_find_claude()
     return ""
+
+
+def cli_command(cli: str, args: list[str]) -> list[str]:
+    """Build the argv for the stored CLI location, including the wsl: form.
+    Arguments pass as real argv either way - no shell quoting of the prompt."""
+    if cli.startswith("wsl:"):
+        return ["wsl", "-e", cli[4:]] + args
+    return [cli] + args
+
+
+def validate_claude_cli(path: str) -> tuple[bool, str]:
+    """Check a user-supplied CLI location actually runs. Accepts a plain path
+    or the wsl:<path> form."""
+    path = (path or "").strip().strip('"')
+    if not path:
+        return False, "Enter the full path to the claude program."
+    if not path.startswith("wsl:") and not Path(path).exists():
+        return False, "Nothing exists at that path. Check for typos."
+    kwargs = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
+    try:
+        r = subprocess.run(cli_command(path, ["--version"]),
+                           capture_output=True, text=True, timeout=60, **kwargs)
+    except Exception as e:
+        return False, f"Found it, but it wouldn't run: {e.__class__.__name__}"
+    if r.returncode != 0:
+        return False, f"It ran but exited with an error: {(r.stderr or r.stdout).strip()[:150]}"
+    return True, f"Claude Code works ({(r.stdout or '').strip()[:60]})."
 
 
 def _draft_via_cli(system_prompt: str, user_prompt: str, cfg: dict) -> str:
@@ -203,7 +259,7 @@ def _draft_via_cli(system_prompt: str, user_prompt: str, cfg: dict) -> str:
         kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
     try:
         proc = subprocess.run(
-            [cli, "-p", prompt, "--output-format", "json"],
+            cli_command(cli, ["-p", prompt, "--output-format", "json"]),
             capture_output=True, text=True, timeout=300, **kwargs,
         )
     except subprocess.TimeoutExpired:

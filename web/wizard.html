@@ -98,7 +98,14 @@
           <button class="btn secondary" onclick="event.stopPropagation();detectClaude()">Check again</button>
           <a class="btn secondary" style="text-decoration:none" href="https://claude.com/claude-code" target="_blank" rel="noopener">Install Claude Code</a>
         </div>
-        <p class="hint">Install it, sign in with your Claude account once, then hit “Check again”.</p>
+        <p class="hint">Install it, sign in with your Claude account once, then hit “Check again”. The check also looks inside WSL on Windows — it can take ~20 seconds.</p>
+        <details onclick="event.stopPropagation()">
+          <summary>It's installed, but not found — locate it manually</summary>
+          <label for="cliPath">Full path to the claude program</label>
+          <input type="text" id="cliPath" placeholder="e.g. C:\Users\you\.local\bin\claude.exe">
+          <p class="hint">Not sure? In a terminal run <code style="background:var(--accent-soft);padding:1px 5px;border-radius:4px">where claude</code> (Windows) or <code style="background:var(--accent-soft);padding:1px 5px;border-radius:4px">which claude</code> (Mac) and paste what it prints. If Claude Code lives inside WSL, run <code style="background:var(--accent-soft);padding:1px 5px;border-radius:4px">which claude</code> in your WSL terminal and paste it as <b>wsl:</b>/home/you/.local/bin/claude</p>
+          <button class="btn secondary" style="margin-top:8px" onclick="event.stopPropagation();locateClaude()">Use this path</button>
+        </details>
       </div>
     </div>
 
@@ -207,13 +214,22 @@ async function validateKey() {
   updateNext0();
 }
 async function detectClaude() {
-  const s = $('cliStatus'); s.className='status'; s.textContent='Looking for Claude Code…'; s.style.display='block';
+  const s = $('cliStatus'); s.className='status'; s.textContent='Looking for Claude Code (including inside WSL — up to ~20s)…'; s.style.display='block';
   const r = await api('/api/setup/detect-claude');
   cliOk = r.found;
   s.className = 'status ' + (r.found?'ok':'err');
+  const where = r.path && r.path.startsWith('wsl:') ? r.path.slice(4) + ' (inside WSL)' : r.path;
   s.textContent = r.found
-    ? 'Claude Code found (' + r.path + '). Make sure you\'ve signed in to it at least once.'
-    : 'Claude Code isn\'t installed (or not on this account). Install it, sign in, then check again.';
+    ? 'Claude Code found: ' + where + '. Make sure you\'ve signed in to it at least once.'
+    : 'Couldn\'t find Claude Code automatically. If it IS installed, use "locate it manually" below — otherwise install it, sign in, then check again.';
+  updateNext0();
+}
+async function locateClaude() {
+  const s = $('cliStatus'); s.className='status'; s.textContent='Testing that path…'; s.style.display='block';
+  const r = await api('/api/setup/claude-path','POST',{path:$('cliPath').value});
+  cliOk = r.ok;
+  s.className = 'status ' + (r.ok?'ok':'err');
+  s.textContent = r.ok ? r.message + ' Saved.' : r.message;
   updateNext0();
 }
 async function validateGmail() {

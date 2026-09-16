@@ -158,8 +158,26 @@ async def validate_key(request: Request):
 
 @app.get("/api/setup/detect-claude")
 def detect_claude():
+    # A manually-located path wins; fall back to auto-detection.
+    stored = (config.load().get("claude_cli_path") or "").strip()
+    if stored and (stored.startswith("wsl:") or Path(stored).exists()):
+        return {"found": True, "path": stored, "manual": True}
     path = drafter.find_claude_cli()
-    return {"found": bool(path), "path": path}
+    return {"found": bool(path), "path": path, "manual": False}
+
+
+@app.post("/api/setup/claude-path")
+async def set_claude_path(request: Request):
+    """Manual escape hatch: the user points MailPilot at their claude program
+    (plain path, or wsl:<path> for a WSL install). Verified by running
+    --version before anything is saved."""
+    _require_header(request)
+    data = await request.json()
+    path = (data.get("path") or "").strip().strip('"')
+    ok, msg = drafter.validate_claude_cli(path)
+    if ok:
+        config.update(claude_cli_path=path)
+    return {"ok": ok, "message": msg, "path": path if ok else ""}
 
 
 @app.post("/api/setup/save")
@@ -178,7 +196,10 @@ async def setup_save(request: Request):
         "only_senders": _split(data.get("only_senders")),
         "poll_interval": max(60, int(data.get("poll_interval") or 300)),
         "live_send": False,  # every new setup starts in test mode
-        "claude_cli_path": drafter.find_claude_cli() if mode == "cli" else "",
+        # A manually-located CLI path must survive setup; only fill by
+        # auto-detection when nothing is stored yet.
+        "claude_cli_path": (config.load().get("claude_cli_path")
+                            or (drafter.find_claude_cli() if mode == "cli" else "")),
     }
     address = changes["gmail_address"]
     app_password = (data.get("app_password") or "").replace(" ", "")
