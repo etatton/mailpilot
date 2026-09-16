@@ -5,29 +5,31 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Set up MailPilot</title>
 <style>
+  /* The Void - MailPilot's one theme, in the ET3 dashboard's language. */
   :root {
-    --paper:#f4f6f7; --surface:#ffffff; --ink:#1a2732; --soft:#4c5b68;
-    --line:#d8dfe4; --accent:#0e7490; --accent-ink:#0b5d74; --accent-soft:#e3f1f5;
-    --ok:#1a7f37; --err:#b42318; --warn-bg:#faf1dc; --warn-ink:#6d5313;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --paper:#10161c; --surface:#171f27; --ink:#dbe3ea; --soft:#93a3b1;
-      --line:#2a3641; --accent:#4cbcd2; --accent-ink:#6fd0e2; --accent-soft:#12303a;
-      --ok:#4ade80; --err:#f87171; --warn-bg:#2c2410; --warn-ink:#e2c479;
-    }
+    --paper:#080d1a; --surface:#0d1526; --ink:#e8eef7; --soft:#8fa3c0;
+    --line:#1e2c49; --accent:#29ABE2; --accent-ink:#5fc6f0; --accent-soft:rgba(41,171,226,0.12);
+    --magenta:#FF2D8B; --yellow:#F5E642;
+    --ok:#39FF14; --err:#ff5c5c; --warn-bg:rgba(245,230,66,0.10); --warn-ink:#F5E642;
   }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--paper); color:var(--ink);
     font-family:system-ui,-apple-system,"Segoe UI",sans-serif; font-size:16px; line-height:1.55; }
-  .wrap { max-width:640px; margin:0 auto; padding:40px 20px 80px; }
-  h1 { font-size:1.7rem; margin:0 0 4px; }
-  h2 { font-size:1.2rem; margin:0 0 10px; }
+  body::before { content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+    background:
+      linear-gradient(rgba(41,171,226,0.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(41,171,226,0.045) 1px, transparent 1px);
+    background-size:42px 42px; }
+  .wrap { max-width:640px; margin:0 auto; padding:40px 20px 80px; position:relative; z-index:1; }
+  h1 { font-size:1.35rem; margin:0 0 4px; text-transform:uppercase; letter-spacing:0.16em;
+    color:var(--accent-ink); text-shadow:0 0 14px rgba(41,171,226,0.55); }
+  h2 { font-size:0.95rem; margin:0 0 10px; text-transform:uppercase; letter-spacing:0.12em;
+    color:var(--yellow); }
   p { margin:0 0 12px; color:var(--soft); }
   .card { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:24px; margin-top:18px; }
   .progress { display:flex; gap:6px; margin:18px 0 0; }
   .progress span { flex:1; height:4px; border-radius:2px; background:var(--line); }
-  .progress span.on { background:var(--accent); }
+  .progress span.on { background:var(--accent); box-shadow:0 0 8px rgba(41,171,226,0.6); }
   label { display:block; font-weight:600; font-size:0.9rem; margin:14px 0 4px; color:var(--ink); }
   input[type=text], input[type=password], input[type=email], input[type=number], textarea {
     width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px;
@@ -35,18 +37,24 @@
   textarea { min-height:80px; resize:vertical; }
   input:focus, textarea:focus { outline:2px solid var(--accent); outline-offset:1px; }
   .btn { display:inline-block; border:none; border-radius:8px; padding:11px 20px; font-size:1rem;
-    font-weight:600; cursor:pointer; background:var(--accent); color:#fff; }
-  .btn.secondary { background:transparent; color:var(--accent-ink); border:1px solid var(--accent); }
-  .btn:disabled { opacity:0.45; cursor:default; }
-  .btn:focus-visible { outline:2px solid var(--ink); outline-offset:2px; }
+    font-weight:700; cursor:pointer; background:var(--accent); color:#04101c;
+    box-shadow:0 0 14px rgba(41,171,226,0.45); transition:box-shadow .15s; }
+  .btn:hover { box-shadow:0 0 22px rgba(41,171,226,0.7); }
+  .btn.secondary { background:transparent; color:var(--accent-ink);
+    border:1px solid rgba(41,171,226,0.55); box-shadow:none; font-weight:600; }
+  .btn.secondary:hover { box-shadow:0 0 12px rgba(41,171,226,0.35); }
+  .btn:disabled { opacity:0.45; cursor:default; box-shadow:none; }
+  .btn:focus-visible { outline:2px solid var(--yellow); outline-offset:2px; }
   .row { display:flex; gap:10px; justify-content:space-between; margin-top:22px; flex-wrap:wrap; }
   .choice { border:2px solid var(--line); border-radius:10px; padding:16px; margin-top:12px; cursor:pointer; }
-  .choice.sel { border-color:var(--accent); background:var(--accent-soft); }
+  .choice.sel { border-color:var(--accent); background:var(--accent-soft);
+    box-shadow:0 0 16px rgba(41,171,226,0.25); }
   .choice h3 { margin:0 0 4px; font-size:1.02rem; }
   .choice p { margin:0; font-size:0.9rem; }
   .status { margin-top:10px; padding:10px 14px; border-radius:8px; font-size:0.92rem; display:none; }
-  .status.ok { display:block; background:var(--accent-soft); color:var(--ok); }
-  .status.err { display:block; background:var(--warn-bg); color:var(--err); }
+  .status.ok { display:block; background:rgba(57,255,20,0.10); color:var(--ok);
+    text-shadow:0 0 8px rgba(57,255,20,0.4); }
+  .status.err { display:block; background:rgba(255,92,92,0.12); color:var(--err); }
   .hint { font-size:0.85rem; color:var(--soft); margin-top:4px; }
   .linkbtns { display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 4px; }
   a { color:var(--accent-ink); }
@@ -156,6 +164,9 @@
       <button class="btn" id="finishBtn" onclick="finish()">Finish setup</button>
     </div>
   </div>
+  <p style="text-align:center;color:var(--soft);font-size:0.8rem;margin-top:36px;letter-spacing:0.08em">
+    An <a href="https://www.et3.media" target="_blank" rel="noopener">ET3 Media</a> product
+  </p>
 </div>
 
 <script>

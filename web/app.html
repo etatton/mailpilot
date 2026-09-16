@@ -5,36 +5,58 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MailPilot</title>
 <style>
+  /* ── The Void: MailPilot's one committed theme, in the ET3 dashboard's
+     language. Space-dark ground + faint grid, yellow eyebrows, glowing cyan
+     primaries, magenta edit-actions, neon-green success. Reading surfaces
+     (original mail, draft textarea) stay calm — the neon lives on chrome. ── */
   :root {
-    --paper:#f4f6f7; --surface:#ffffff; --ink:#1a2732; --soft:#4c5b68;
-    --line:#d8dfe4; --accent:#0e7490; --accent-ink:#0b5d74; --accent-soft:#e3f1f5;
-    --ok:#1a7f37; --err:#b42318; --err-bg:#fbe9e7; --warn-bg:#faf1dc; --warn-ink:#6d5313;
-    --vac-bg:#e9e4fb; --vac-ink:#4a3a9c;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --paper:#10161c; --surface:#171f27; --ink:#dbe3ea; --soft:#93a3b1;
-      --line:#2a3641; --accent:#4cbcd2; --accent-ink:#6fd0e2; --accent-soft:#12303a;
-      --ok:#4ade80; --err:#f87171; --err-bg:#3a1512; --warn-bg:#2c2410; --warn-ink:#e2c479;
-      --vac-bg:#241c3a; --vac-ink:#b7a6f2;
-    }
+    --paper:#080d1a;                 /* the void */
+    --surface:#0d1526;               /* lifted panel */
+    --well:#0a1120;                  /* reading/writing wells, darker than panels */
+    --ink:#e8eef7; --soft:#8fa3c0;
+    --line:#1e2c49;
+    --accent:#29ABE2; --accent-ink:#5fc6f0; --accent-soft:rgba(41,171,226,0.12);
+    --magenta:#FF2D8B; --magenta-soft:rgba(255,45,139,0.12);
+    --ok:#39FF14; --ok-soft:rgba(57,255,20,0.10);
+    --yellow:#F5E642; --warn-bg:rgba(245,230,66,0.10); --warn-ink:#F5E642;
+    --err:#ff5c5c; --err-bg:rgba(255,92,92,0.12);
+    --vac-bg:rgba(255,45,139,0.10); --vac-ink:#ff8ec0;
   }
   * { box-sizing:border-box; }
+  [hidden] { display:none !important; }  /* no display rule may defeat the hidden attribute */
   body { margin:0; background:var(--paper); color:var(--ink);
     font-family:system-ui,-apple-system,"Segoe UI",sans-serif; font-size:15.5px; line-height:1.5; }
-  header { background:var(--surface); border-bottom:1px solid var(--line);
+  body::before { content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+    background:
+      linear-gradient(rgba(41,171,226,0.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(41,171,226,0.045) 1px, transparent 1px);
+    background-size:42px 42px; }
+  header, .banner, main, .foot { position:relative; z-index:1; }
+  header { background:rgba(13,21,38,0.92); border-bottom:1px solid var(--line);
     padding:12px 20px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
-  header h1 { font-size:1.15rem; margin:0; }
-  .pill { font-size:0.75rem; font-weight:700; letter-spacing:0.05em; padding:3px 10px; border-radius:999px; }
-  .pill.test { background:var(--warn-bg); color:var(--warn-ink); }
-  .pill.live { background:var(--accent-soft); color:var(--ok); }
+  header h1 { font-size:1.05rem; margin:0; text-transform:uppercase; letter-spacing:0.18em;
+    color:var(--accent-ink); text-shadow:0 0 12px rgba(41,171,226,0.55); font-weight:700; }
+  .pill { font-size:0.72rem; font-weight:700; letter-spacing:0.09em; padding:3px 11px;
+    border-radius:999px; text-transform:uppercase; border:1px solid transparent; }
+  .pill.test { background:var(--warn-bg); color:var(--yellow); border-color:rgba(245,230,66,0.4); }
+  .pill.live { background:var(--ok-soft); color:var(--ok); border-color:rgba(57,255,20,0.4);
+    text-shadow:0 0 8px rgba(57,255,20,0.5); }
   .spacer { flex:1; }
-  .btn { border:none; border-radius:8px; padding:8px 14px; font-size:0.9rem; font-weight:600;
-    cursor:pointer; background:var(--accent); color:#fff; }
-  .btn.secondary { background:transparent; color:var(--accent-ink); border:1px solid var(--accent); }
-  .btn.danger { background:transparent; color:var(--err); border:1px solid var(--err); }
-  .btn:disabled { opacity:0.45; cursor:default; }
-  .btn:focus-visible { outline:2px solid var(--ink); outline-offset:2px; }
+  .btn { border:none; border-radius:8px; padding:8px 14px; font-size:0.9rem; font-weight:700;
+    cursor:pointer; background:var(--accent); color:#04101c;
+    box-shadow:0 0 14px rgba(41,171,226,0.45); transition:box-shadow .15s; }
+  .btn:hover { box-shadow:0 0 22px rgba(41,171,226,0.7); }
+  .btn.secondary { background:transparent; color:var(--accent-ink);
+    border:1px solid rgba(41,171,226,0.55); box-shadow:none; font-weight:600; }
+  .btn.secondary:hover { box-shadow:0 0 12px rgba(41,171,226,0.35); }
+  .btn.alt { background:transparent; color:var(--magenta);
+    border:1px solid rgba(255,45,139,0.6); box-shadow:none; font-weight:600; }
+  .btn.alt:hover { box-shadow:0 0 12px rgba(255,45,139,0.4); }
+  .btn.danger { background:transparent; color:var(--err); border:1px solid rgba(255,92,92,0.6);
+    box-shadow:none; font-weight:600; }
+  .btn.danger:hover { box-shadow:0 0 12px rgba(255,92,92,0.35); }
+  .btn:disabled { opacity:0.45; cursor:default; box-shadow:none; }
+  .btn:focus-visible { outline:2px solid var(--yellow); outline-offset:2px; }
   .banner { padding:10px 20px; font-size:0.92rem; display:flex; gap:12px; align-items:center; }
   .banner.err { background:var(--err-bg); color:var(--err); }
   .banner.warn { background:var(--warn-bg); color:var(--warn-ink); }
@@ -48,6 +70,7 @@
   .split-menu button { border:none; background:none; color:var(--ink); text-align:left;
     padding:9px 14px; font-size:0.88rem; cursor:pointer; font-family:inherit; }
   .split-menu button:hover { background:var(--accent-soft); color:var(--accent-ink); }
+  .split-menu[hidden] { display:none; }  /* display:flex must not defeat the hidden attribute */
   .labs-row { display:flex; align-items:center; gap:10px; padding:10px 0;
     border-bottom:1px solid var(--line); }
   .labs-row:last-child { border-bottom:none; }
@@ -108,9 +131,11 @@
   .bar > i { display:block; height:100%; background:var(--accent); width:0; transition:width .3s; }
   main { max-width:860px; margin:0 auto; padding:20px; }
   .tabs { display:flex; gap:4px; border-bottom:1px solid var(--line); margin-bottom:16px; }
-  .tab { background:none; border:none; padding:10px 16px; font-size:0.95rem; cursor:pointer;
-    color:var(--soft); border-bottom:2px solid transparent; font-weight:600; }
-  .tab.on { color:var(--accent-ink); border-bottom-color:var(--accent); }
+  .tab { background:none; border:none; padding:10px 16px; font-size:0.8rem; cursor:pointer;
+    color:var(--soft); border-bottom:2px solid transparent; font-weight:700;
+    text-transform:uppercase; letter-spacing:0.12em; }
+  .tab.on { color:var(--yellow); border-bottom-color:var(--yellow);
+    text-shadow:0 0 10px rgba(245,230,66,0.4); }
   .card { background:var(--surface); border:1px solid var(--line); border-radius:12px;
     padding:18px 20px; margin-bottom:14px; }
   .meta { display:flex; gap:10px; flex-wrap:wrap; align-items:baseline; margin-bottom:8px; }
@@ -127,14 +152,19 @@
   .actions { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
   .empty { text-align:center; color:var(--soft); padding:50px 20px; }
   .status-chip { font-size:0.72rem; font-weight:700; padding:2px 8px; border-radius:999px; text-transform:uppercase; letter-spacing:0.04em; }
-  .st-sent { background:var(--accent-soft); color:var(--ok); }
+  .st-sent { background:var(--ok-soft); color:var(--ok); text-shadow:0 0 8px rgba(57,255,20,0.45); }
   .st-simulated { background:var(--warn-bg); color:var(--warn-ink); }
   .st-discarded, .st-blocked { background:var(--err-bg); color:var(--err); }
+  .st-vip { background:var(--warn-bg); color:var(--yellow); text-shadow:0 0 8px rgba(245,230,66,0.45); }
   .inbox-badge { font-size:0.72rem; font-weight:600; padding:2px 8px; border-radius:999px;
     background:var(--accent-soft); color:var(--accent-ink); }
   dialog { border:1px solid var(--line); border-radius:12px; background:var(--surface); color:var(--ink);
     max-width:520px; width:92%; padding:22px; }
-  dialog::backdrop { background:rgba(0,0,0,0.45); }
+  dialog::backdrop { background:rgba(2,5,12,0.7); }
+  dialog h2 { text-transform:uppercase; letter-spacing:0.12em; font-size:0.92rem !important;
+    color:var(--yellow); }
+  .foot a { color:var(--accent-ink); text-decoration:none; }
+  .foot a:hover { text-shadow:0 0 10px rgba(41,171,226,0.6); }
   dialog label { display:block; font-weight:600; font-size:0.88rem; margin:12px 0 4px; }
   dialog input, dialog textarea, dialog select { width:100%; padding:9px 11px; border:1px solid var(--line);
     border-radius:8px; background:var(--paper); color:var(--ink); font-size:0.95rem; font-family:inherit; }
@@ -184,7 +214,8 @@
   </div>
   <div id="content"><div class="empty">Loading…</div></div>
 </main>
-<div class="foot">Every reply passes through your hands. MailPilot never sends without your approval.</div>
+<div class="foot">Every reply passes through your hands. MailPilot never sends without your approval.<br>
+  <span style="letter-spacing:0.08em">An <a href="https://www.et3.media" target="_blank" rel="noopener">ET3 Media</a> product</span></div>
 
 <dialog id="settingsDlg">
   <h2 style="margin:0 0 6px;font-size:1.15rem">Settings</h2>
@@ -480,7 +511,7 @@ async function render(){
     }
     html += d.drafts.map(x => `
       <div class="card" id="card${x.id}">
-        <div class="meta">${x.vip?'<span class="status-chip st-sent">★ VIP</span>':''}${x.kind==='followup'?'<span class="status-chip st-simulated">follow-up</span>':''}${x.kind==='reconnect'?'<span class="status-chip st-simulated">reconnect</span>':''}${parleyChip(x)}${x.snoozed_until?'<span class="status-chip st-simulated">⏰ returned from snooze</span>':''}<strong>${esc(x.from_name||x.from_address)}</strong>
+        <div class="meta">${x.vip?'<span class="status-chip st-vip">★ VIP</span>':''}${x.kind==='followup'?'<span class="status-chip st-simulated">follow-up</span>':''}${x.kind==='reconnect'?'<span class="status-chip st-simulated">reconnect</span>':''}${parleyChip(x)}${x.snoozed_until?'<span class="status-chip st-simulated">⏰ returned from snooze</span>':''}<strong>${esc(x.from_name||x.from_address)}</strong>
           <span class="sub">${esc(x.from_address)}</span>
           <span class="sub">· ${fmtTime(x.received_at)}</span>${inboxBadge(x)}</div>
         <div style="font-weight:600;margin-bottom:6px">${esc(x.subject)||'(no subject)'}</div>
@@ -490,11 +521,11 @@ async function render(){
         ${x.kind==='parley' ? `<p class="parley-note">The scheduling data block at the end of the draft is what the other assistant reads. Edit the wording freely; leave the block alone.</p>` : ''}
         <div class="actions">
           <button class="btn" onclick="approve(${x.id})">Approve &amp; Send</button>
-          <button class="btn secondary" onclick="regen(${x.id})">Regenerate…</button>
-          ${state.feature_negotiation ? `<button class="btn secondary" onclick="negotiate(${x.id})">Negotiate</button>` : ''}
-          ${state.feature_parley && x.kind !== 'parley' ? `<button class="btn secondary" onclick="parleyThis(${x.id})" title="Rewrite this as a scheduling proposal with times from your availability, so the other side's assistant can answer it.">Parley this</button>` : ''}
+          <button class="btn alt" onclick="regen(${x.id})">Regenerate…</button>
+          ${state.feature_negotiation ? `<button class="btn alt" onclick="negotiate(${x.id})">Negotiate</button>` : ''}
+          ${state.feature_parley && x.kind !== 'parley' ? `<button class="btn alt" onclick="parleyThis(${x.id})" title="Rewrite this as a scheduling proposal with times from your availability, so the other side's assistant can answer it.">Parley this</button>` : ''}
           <span class="split">
-            <button class="btn secondary" onclick="toggleSnoozeMenu(${x.id})">Snooze ▾</button>
+            <button class="btn alt" onclick="toggleSnoozeMenu(${x.id})">Snooze ▾</button>
             <span class="split-menu" id="snoozeMenu${x.id}" hidden>
               <button onclick="snooze(${x.id},'1d')">1 day</button>
               <button onclick="snooze(${x.id},'3d')">3 days</button>
@@ -589,7 +620,7 @@ async function openPeople(){
   $('contactList').innerHTML = d.contacts.length
     ? d.contacts.map(c => `<div class="card" style="padding:10px 14px;margin-bottom:8px">
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          <span class="status-chip ${c.rule==='vip'?'st-sent':c.rule==='auto_skip'?'st-blocked':'st-simulated'}">${c.rule==='vip'?'★ VIP':c.rule.replace('_',' ')}</span>
+          <span class="status-chip ${c.rule==='vip'?'st-vip':c.rule==='auto_skip'?'st-blocked':'st-simulated'}">${c.rule==='vip'?'★ VIP':c.rule.replace('_',' ')}</span>
           <strong style="font-size:0.9rem">${esc(c.name||c.address)}</strong>
           <span style="flex:1;font-size:0.82rem;color:var(--soft)">${esc(c.address)}${c.notes?' · '+esc(c.notes.slice(0,60)):''}</span>
           <button class="btn secondary" onclick='editContact(${JSON.stringify(c).replace(/'/g,"&#39;")})'>Edit</button>
