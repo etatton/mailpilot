@@ -34,10 +34,15 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt pyinstaller pillow
       - run: python scripts/make_icon.py
-      - name: Build exe
+      - run: python scripts/make_version_info.py
+      # --onedir, not --onefile: the self-extracting onefile stub is the #1
+      # PyInstaller antivirus false-positive trigger (Defender called v0.3.1
+      # a virus). A folder build + real version metadata keeps AV calm.
+      - name: Build app folder
         run: >
-          pyinstaller --noconfirm --onefile --noconsole --name MailPilot
+          pyinstaller --noconfirm --onedir --noconsole --name MailPilot
           --icon build/icon.ico
+          --version-file build/version_info.txt
           --add-data "web;web"
           --hidden-import uvicorn.logging
           --hidden-import uvicorn.loops.auto
@@ -49,7 +54,7 @@ jobs:
       - name: Smoke test exe
         shell: pwsh
         run: |
-          Start-Process -FilePath "dist\MailPilot.exe" -ArgumentList "--headless","--port","8765"
+          Start-Process -FilePath "dist\MailPilot\MailPilot.exe" -ArgumentList "--headless","--port","8765"
           $ok = $false
           foreach ($i in 1..30) {   # onefile extraction + Defender scan can take a while
             Start-Sleep -Seconds 5
@@ -67,10 +72,13 @@ jobs:
           $w = Invoke-WebRequest -Uri "http://127.0.0.1:8765/" -UseBasicParsing
           if ($w.Content -notmatch "MailPilot") { exit 1 }
           Write-Host "Windows smoke test passed."
+      - name: Zip app folder
+        shell: pwsh
+        run: Compress-Archive -Path dist\MailPilot -DestinationPath dist\MailPilot-windows.zip
       - uses: actions/upload-artifact@v4
         with:
           name: MailPilot-windows
-          path: dist/MailPilot.exe
+          path: dist/MailPilot-windows.zip
 
   build-macos:
     needs: test
@@ -120,6 +128,6 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/MailPilot.exe
+            dist/MailPilot-windows.zip
             dist/MailPilot-mac.zip
           generate_release_notes: true

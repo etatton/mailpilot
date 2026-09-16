@@ -12,9 +12,12 @@ anyone's server except Google's and Anthropic's.
 
 Download the latest release for your platform from the **Releases** page:
 
-- **Windows** — `MailPilot.exe`. Windows SmartScreen will warn about an
+- **Windows** — `MailPilot-windows.zip`. Right-click → **Extract All**, move the
+  extracted `MailPilot` folder somewhere permanent (e.g. Documents), then
+  double-click `MailPilot.exe` inside it. SmartScreen may warn about an
   unrecognized app the first time: click **More info → Run anyway**. (The app is
-  unsigned, not unsafe — the source is this repo.)
+  unsigned, not unsafe — the source is this repo, and every release is built in
+  public by the CI workflow here.)
 - **Mac** — `MailPilot-mac.zip`. Unzip, move `MailPilot.app` to Applications.
   macOS Gatekeeper will block the first launch: go to **System Settings →
   Privacy & Security**, scroll down, and click **Open Anyway** (on older macOS,
