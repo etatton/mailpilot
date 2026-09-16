@@ -163,7 +163,12 @@ def detect_claude():
     if stored and (stored.startswith("wsl:") or Path(stored).exists()):
         return {"found": True, "path": stored, "manual": True}
     path = drafter.find_claude_cli()
-    return {"found": bool(path), "path": path, "manual": False}
+    return {
+        "found": bool(path), "path": path, "manual": False,
+        "desktop_app": drafter.claude_desktop_installed(),
+        "install_cmd": drafter.cli_install_command(),
+        "platform": sys.platform,
+    }
 
 
 @app.post("/api/setup/claude-path")

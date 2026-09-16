@@ -217,6 +217,25 @@ def find_claude_cli() -> str:
     return ""
 
 
+def claude_desktop_installed() -> bool:
+    """Heuristic: is the Claude DESKTOP app (the chat window) on this machine?
+    It does NOT provide the `claude` CLI - knowing it's here lets the wizard
+    explain the difference instead of saying 'not installed'."""
+    import os
+    if sys.platform == "win32":
+        localapp = os.environ.get("LOCALAPPDATA", "")
+        return bool(localapp) and (Path(localapp) / "AnthropicClaude").exists()
+    if sys.platform == "darwin":
+        return Path("/Applications/Claude.app").exists()
+    return False
+
+
+def cli_install_command() -> str:
+    if sys.platform == "win32":
+        return "irm https://claude.ai/install.ps1 | iex"
+    return "curl -fsSL https://claude.ai/install.sh | bash"
+
+
 def cli_command(cli: str, args: list[str]) -> list[str]:
     """Build the argv for the stored CLI location, including the wsl: form.
     Arguments pass as real argv either way - no shell quoting of the prompt."""

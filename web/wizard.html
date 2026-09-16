@@ -99,6 +99,11 @@
           <a class="btn secondary" style="text-decoration:none" href="https://claude.com/claude-code" target="_blank" rel="noopener">Install Claude Code</a>
         </div>
         <p class="hint">Install it, sign in with your Claude account once, then hit “Check again”. The check also looks inside WSL on Windows — it can take ~20 seconds.</p>
+        <div id="cliInstallHelp" style="display:none">
+          <p class="hint" id="cliInstallWhy"></p>
+          <pre style="background:#0a1120;border:1px solid var(--line);border-radius:8px;padding:10px 14px;font-size:0.85rem;overflow-x:auto;user-select:all" id="cliInstallCmd"></pre>
+          <p class="hint">Paste that into <b>PowerShell</b> (Windows) or <b>Terminal</b> (Mac) and press Enter. When it finishes, run <code style="background:var(--accent-soft);padding:1px 5px;border-radius:4px">claude</code> in the same window and sign in with your Claude account — the desktop app's sign-in doesn't carry over. Then come back and hit “Check again”.</p>
+        </div>
         <details onclick="event.stopPropagation()">
           <summary>It's installed, but not found — locate it manually</summary>
           <label for="cliPath">Full path to the claude program</label>
@@ -221,7 +226,19 @@ async function detectClaude() {
   const where = r.path && r.path.startsWith('wsl:') ? r.path.slice(4) + ' (inside WSL)' : r.path;
   s.textContent = r.found
     ? 'Claude Code found: ' + where + '. Make sure you\'ve signed in to it at least once.'
-    : 'Couldn\'t find Claude Code automatically. If it IS installed, use "locate it manually" below — otherwise install it, sign in, then check again.';
+    : (r.desktop_app
+        ? 'You have the Claude desktop app — that\'s the chat window. MailPilot needs the separate command-line piece. One command installs it:'
+        : 'Couldn\'t find the Claude Code command-line tool. Install it with the command below (or use "locate it manually" if you know it\'s here).');
+  const help = $('cliInstallHelp');
+  if (!r.found && r.install_cmd){
+    $('cliInstallWhy').textContent = r.desktop_app
+      ? 'The desktop app and the command-line tool are separate installs with separate sign-ins.'
+      : 'Copy this install command:';
+    $('cliInstallCmd').textContent = r.install_cmd;
+    help.style.display = 'block';
+  } else {
+    help.style.display = 'none';
+  }
   updateNext0();
 }
 async function locateClaude() {
