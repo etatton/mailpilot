@@ -27,20 +27,22 @@ def boom():
 
 
 def seed(dbf, from_address="alice@example.com", body="Thanks Alice, sounds good.\n\nPilot",
-         draft_status="queued", message_id=None):
+         draft_status="queued", message_id=None, kind="reply", email_id=None):
     with db.conn(dbf) as c:
+        if email_id is None:
+            cur = c.execute(
+                "INSERT INTO emails (message_id, from_address, from_name, subject, body_text,"
+                " received_at, processed_at) VALUES (?,?,?,?,?,?,?)",
+                (message_id or f"<m{c.execute('SELECT COUNT(*) FROM emails').fetchone()[0]}@x>",
+                 from_address, "Alice", "Hello", "Hi there", db.now_iso(), db.now_iso()),
+            )
+            email_id = cur.lastrowid
         cur = c.execute(
-            "INSERT INTO emails (message_id, from_address, from_name, subject, body_text,"
-            " received_at, processed_at) VALUES (?,?,?,?,?,?,?)",
-            (message_id or f"<m{c.execute('SELECT COUNT(*) FROM emails').fetchone()[0]}@x>",
-             from_address, "Alice", "Hello", "Hi there", db.now_iso(), db.now_iso()),
+            "INSERT INTO drafts (email_id, body, status, kind, created_at, updated_at)"
+            " VALUES (?,?,?,?,?,?)",
+            (email_id, body, draft_status, kind, db.now_iso(), db.now_iso()),
         )
-        eid = cur.lastrowid
-        cur = c.execute(
-            "INSERT INTO drafts (email_id, body, status, created_at, updated_at)"
-            " VALUES (?,?,?,?,?)", (eid, body, draft_status, db.now_iso(), db.now_iso()),
-        )
-        return cur.lastrowid, eid
+        return cur.lastrowid, email_id
 
 
 def main():
@@ -87,6 +89,21 @@ def main():
     d6, _ = seed(tmp, draft_status="approved", body="<!doctype html><html>502 Bad Gateway</html>")
     check("HTML document body blocks",
           sender.send_reply(d6, live, tmp, smtp_factory=boom), "blocked", "html_document")
+
+    # (g) a follow-up nudge after a SENT reply passes guard 4 (kind-scoped)...
+    d7, e7 = seed(tmp, draft_status="sent", message_id="<fu@x>", kind="reply")
+    f1, _ = seed(tmp, draft_status="approved", kind="followup", email_id=e7,
+                 body="Just floating this back up. Pilot")
+    check("follow-up after sent reply is allowed",
+          sender.send_reply(f1, CFG, tmp, smtp_factory=boom), "simulated")
+
+    # ...but a SECOND follow-up for the same message blocks
+    with db.conn(tmp) as c:
+        c.execute("UPDATE drafts SET status='sent' WHERE id=?", (f1,))
+    f2, _ = seed(tmp, draft_status="approved", kind="followup", email_id=e7,
+                 body="Another nudge. Pilot")
+    check("second follow-up blocks",
+          sender.send_reply(f2, live, tmp, smtp_factory=boom), "blocked", "already_sent")
 
     print()
     if failures:

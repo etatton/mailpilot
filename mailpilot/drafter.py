@@ -65,9 +65,51 @@ def build_system_prompt(cfg: dict, samples: list[str] | None = None) -> str:
     return "\n\n".join(parts)
 
 
-def build_user_prompt(email_row, guidance: str = "", previous_draft: str = "") -> str:
-    p = (
-        "Draft a reply to this email.\n\n"
+def _sender_context(email_row, db_file=None) -> str:
+    """Thread memory: recent correspondence with this sender (their earlier
+    emails + our sent replies), plus any saved notes about them."""
+    from . import db
+    parts = []
+    try:
+        from .poller import lookup_contact
+        contact = lookup_contact(email_row["from_address"], db_file)
+        if contact and (contact["notes"] or contact["name"]):
+            who = contact["name"] or email_row["from_address"]
+            note = f" Notes: {contact['notes']}" if contact["notes"] else ""
+            parts.append(f"About this person: {who}.{note}")
+    except Exception:
+        pass
+    try:
+        with db.conn(db_file) as c:
+            prior = c.execute(
+                "SELECT e.received_at, e.subject, e.body_text,"
+                " (SELECT d.body FROM drafts d WHERE d.email_id=e.id"
+                "   AND d.status='sent' ORDER BY d.id DESC LIMIT 1) AS our_reply"
+                " FROM emails e WHERE lower(e.from_address)=lower(?) AND e.id != ?"
+                " ORDER BY e.id DESC LIMIT 3",
+                (email_row["from_address"], email_row["id"]),
+            ).fetchall()
+        if prior:
+            lines = ["Recent correspondence with this person (newest first):"]
+            for p in prior:
+                lines.append(
+                    f"[{p['received_at']}] They wrote ({p['subject'] or 'no subject'}): "
+                    + (p["body_text"] or "")[:600]
+                )
+                if p["our_reply"]:
+                    lines.append("You replied: " + p["our_reply"][:600])
+            parts.append("\n".join(lines))
+    except Exception:
+        pass
+    return "\n\n".join(parts)
+
+
+def build_user_prompt(email_row, guidance: str = "", previous_draft: str = "",
+                      context: str = "") -> str:
+    p = "Draft a reply to this email.\n\n"
+    if context:
+        p += context + "\n\n---\nThe email to reply to:\n\n"
+    p += (
         f"From: {email_row['from_name']} <{email_row['from_address']}>\n"
         f"Subject: {email_row['subject']}\n"
         f"Date: {email_row['received_at']}\n\n"
@@ -195,13 +237,30 @@ def generate(system_prompt: str, user_prompt: str, cfg: dict) -> str:
     return _draft_via_api(system_prompt, user_prompt, cfg)
 
 
-def draft_reply(email_row, cfg: dict = None, guidance: str = "", previous_draft: str = "") -> str:
+def draft_reply(email_row, cfg: dict = None, guidance: str = "", previous_draft: str = "",
+                db_file=None) -> str:
     cfg = cfg or config.load()
     return generate(
         build_system_prompt(cfg),
-        build_user_prompt(email_row, guidance, previous_draft),
+        build_user_prompt(email_row, guidance, previous_draft,
+                          context=_sender_context(email_row, db_file)),
         cfg,
     )
+
+
+def draft_followup(email_row, sent_reply: str, days: int, cfg: dict = None) -> str:
+    """A short nudge on a reply that got no response. Queued like any draft."""
+    cfg = cfg or config.load()
+    user = (
+        f"You replied to this person {days} days ago and they haven't responded. "
+        "Draft a SHORT, friendly follow-up nudge (2-4 sentences): reference your "
+        "earlier reply naturally, no guilt-tripping, make it easy to answer.\n\n"
+        f"Their original email (From: {email_row['from_name']} "
+        f"<{email_row['from_address']}>, Subject: {email_row['subject']}):\n"
+        f"{(email_row['body_text'] or '')[:1500]}\n\n"
+        f"Your reply that went unanswered:\n{(sent_reply or '')[:1500]}"
+    )
+    return generate(build_system_prompt(cfg), user, cfg)
 
 
 def analyze_voice(cfg: dict = None, db_file=None) -> str:

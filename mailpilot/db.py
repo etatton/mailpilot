@@ -37,6 +37,18 @@ CREATE TABLE IF NOT EXISTS voice_samples (
     body TEXT NOT NULL,
     created_at TEXT
 );
+CREATE TABLE IF NOT EXISTS contacts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    address TEXT UNIQUE NOT NULL,      -- lowercased email address or bare domain
+    name TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    rule TEXT NOT NULL DEFAULT 'normal',  -- normal | vip | always_draft | auto_skip
+    created_at TEXT
+);
+CREATE TABLE IF NOT EXISTS kv (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
 CREATE TABLE IF NOT EXISTS errors (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source TEXT NOT NULL,
@@ -68,9 +80,37 @@ def conn(db_file=None):
         c.close()
 
 
+# Additions to tables that shipped in earlier versions (idempotent, guarded by
+# PRAGMA table_info so existing installs upgrade in place).
+_COLUMN_ADDITIONS = [
+    ("drafts", "notified", "INTEGER NOT NULL DEFAULT 0"),
+    ("drafts", "kind", "TEXT NOT NULL DEFAULT 'reply'"),   # reply | followup
+    ("emails", "vip", "INTEGER NOT NULL DEFAULT 0"),
+]
+
+
 def bootstrap(db_file=None) -> None:
     with conn(db_file) as c:
         c.executescript(_SCHEMA)
+        for table, col, decl in _COLUMN_ADDITIONS:
+            have = {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
+            if col not in have:
+                c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+
+
+def kv_get(key: str, db_file=None) -> str:
+    with conn(db_file) as c:
+        row = c.execute("SELECT value FROM kv WHERE key=?", (key,)).fetchone()
+    return row["value"] if row else ""
+
+
+def kv_set(key: str, value: str, db_file=None) -> None:
+    with conn(db_file) as c:
+        c.execute(
+            "INSERT INTO kv (key, value) VALUES (?,?)"
+            " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value),
+        )
 
 
 def record_error(source: str, message: str, tb: str = "", db_file=None) -> None:

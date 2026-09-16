@@ -36,6 +36,22 @@ you through everything:
 MailPilot starts in **test mode**: approve one practice draft (it's simulated,
 nothing sends), then flip Live sending on in Settings.
 
+## Beyond the basics
+
+- **Voice learning** — paste real emails you've written (Voice dialog), click
+  *Analyze my voice*, and every draft follows the distilled, editable profile.
+- **Waiting-drafts notifications** — MailPilot emails *you* (and only you — the
+  path is hard-wired to your own address) when drafts are queued, at most once
+  per cooldown window.
+- **Thread memory** — drafts include your recent correspondence with that
+  sender, so replies carry context.
+- **People rules** — per-sender settings: ★ VIP (always drafted, top of queue,
+  instant notification), always-draft (beats bulk filters), auto-skip, plus
+  notes that feed the drafting context ("my landlord — keep it formal").
+- **Follow-up nudges** — a sent reply with no response after N days (default 3,
+  0 = off) gets a short nudge drafted and queued. Like everything else, it
+  never sends itself.
+
 ## What it never does
 
 - It never sends without your click — the send path has a hard series of guards

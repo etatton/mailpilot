@@ -50,11 +50,13 @@ def send_reply(draft_id: int, cfg: dict = None, db_file=None, smtp_factory=None)
         if _addr_matches(recipient, cfg.get("ignore_senders") or []):
             return _block(c, draft_id, "recipient_on_ignore_list")
 
-        # Guard 4 - no double replies to the same message
+        # Guard 4 - no double sends of the same KIND for one message (a follow-up
+        # nudge after a sent reply is legitimate; a second reply or second nudge is not)
+        kind = draft["kind"] if "kind" in draft.keys() else "reply"
         dup = c.execute(
             "SELECT d.id FROM drafts d JOIN emails e ON e.id=d.email_id"
-            " WHERE e.message_id=? AND d.status='sent' AND d.id != ?",
-            (em["message_id"], draft_id),
+            " WHERE e.message_id=? AND d.status='sent' AND d.kind=? AND d.id != ?",
+            (em["message_id"], kind, draft_id),
         ).fetchone()
         if dup:
             return _block(c, draft_id, "already_sent_for_this_message")
@@ -113,3 +115,33 @@ def send_reply(draft_id: int, cfg: dict = None, db_file=None, smtp_factory=None)
             (db.now_iso(), db.now_iso(), draft_id),
         )
     return {"ok": True, "status": "sent", "recipient": recipient}
+
+
+def send_self_notification(subject: str, body: str, cfg: dict = None) -> bool:
+    """The ONLY other SMTP path, and it is hard-wired to the user's own address -
+    it cannot be pointed anywhere else. Used for 'drafts waiting' notices.
+    Best-effort: failures are recorded (they surface in the UI) but never raise."""
+    cfg = cfg or config.load()
+    address = cfg.get("gmail_address")
+    password = config.get_secret("gmail_app_password")
+    if not (address and password):
+        return False
+    msg = EmailMessage()
+    msg["From"] = email.utils.formataddr(("MailPilot", address))
+    msg["To"] = address          # self, always - never a parameter
+    msg["Subject"] = subject
+    msg.set_content(body)
+    try:
+        smtp = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30)
+        try:
+            smtp.login(address, password)
+            smtp.send_message(msg)
+        finally:
+            try:
+                smtp.quit()
+            except Exception:
+                pass
+        return True
+    except Exception as e:
+        db.record_error("notify", f"Notification email failed: {e}", traceback.format_exc())
+        return False

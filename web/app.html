@@ -79,6 +79,7 @@
   <span class="spacer"></span>
   <span class="sub" id="lastPoll" style="color:var(--soft);font-size:0.82rem"></span>
   <button class="btn secondary" onclick="pollNow()">Check mail now</button>
+  <button class="btn secondary" onclick="openPeople()">People</button>
   <button class="btn secondary" onclick="openVoice()">Voice</button>
   <button class="btn secondary" onclick="openSettings()">Settings</button>
 </header>
@@ -108,6 +109,15 @@
   <label style="display:flex;gap:10px;align-items:center;font-size:1rem">
     <input type="checkbox" id="setAutostart" style="width:auto"> Start with the computer &amp; restart on crash
   </label>
+  <label style="display:flex;gap:10px;align-items:center;font-size:1rem">
+    <input type="checkbox" id="setNotify" style="width:auto"> Email me when drafts are waiting
+  </label>
+  <div style="display:flex;gap:12px">
+    <span style="flex:1"><label for="setCooldown">Notify at most every (min)</label>
+    <input type="number" id="setCooldown" min="0"></span>
+    <span style="flex:1"><label for="setFollowup">Follow-up nudge after (days, 0 = off)</label>
+    <input type="number" id="setFollowup" min="0"></span>
+  </div>
   <label for="setSignature">Sign replies as</label>
   <input type="text" id="setSignature">
   <label for="setTone">Tone notes</label>
@@ -147,6 +157,32 @@
   <div class="actions" style="justify-content:flex-end">
     <button class="btn secondary" onclick="document.getElementById('voiceDlg').close()">Close</button>
     <button class="btn" onclick="saveProfile()">Save profile</button>
+  </div>
+</dialog>
+
+<dialog id="peopleDlg">
+  <h2 style="margin:0 0 6px;font-size:1.15rem">People</h2>
+  <p style="color:var(--soft);font-size:0.9rem;margin:0 0 10px">Per-sender rules and context. <strong>VIP</strong>: always drafted, top of the queue, instant notification. <strong>Always draft</strong>: beats the bulk-mail filters. <strong>Auto-skip</strong>: never drafted. Notes feed the drafting context.</p>
+  <label for="pAddress">Email address or domain</label>
+  <input type="text" id="pAddress" placeholder="alice@example.com or example.com">
+  <div style="display:flex;gap:12px">
+    <span style="flex:1"><label for="pName">Name</label><input type="text" id="pName"></span>
+    <span style="flex:1"><label for="pRule">Rule</label>
+      <select id="pRule">
+        <option value="normal">Normal</option>
+        <option value="vip">★ VIP</option>
+        <option value="always_draft">Always draft</option>
+        <option value="auto_skip">Auto-skip</option>
+      </select></span>
+  </div>
+  <label for="pNotes">Notes for drafting <span style="font-weight:400;color:var(--soft)">(e.g. “my landlord — keep it formal”)</span></label>
+  <textarea id="pNotes" rows="2"></textarea>
+  <div class="actions" style="justify-content:flex-end">
+    <button class="btn" onclick="saveContact()">Save person</button>
+  </div>
+  <div id="contactList" style="margin-top:12px"></div>
+  <div class="actions" style="justify-content:flex-end">
+    <button class="btn secondary" onclick="document.getElementById('peopleDlg').close()">Close</button>
   </div>
 </dialog>
 
@@ -209,7 +245,7 @@ async function render(){
     if (!d.drafts.length){ box.innerHTML = '<div class="empty">Queue is clear. New drafts appear here after each mail check.</div>'; return; }
     box.innerHTML = d.drafts.map(x => `
       <div class="card" id="card${x.id}">
-        <div class="meta"><strong>${esc(x.from_name||x.from_address)}</strong>
+        <div class="meta">${x.vip?'<span class="status-chip st-sent">★ VIP</span>':''}${x.kind==='followup'?'<span class="status-chip st-simulated">follow-up</span>':''}<strong>${esc(x.from_name||x.from_address)}</strong>
           <span class="sub">${esc(x.from_address)}</span>
           <span class="sub">· ${fmtTime(x.received_at)}</span></div>
         <div style="font-weight:600;margin-bottom:6px">${esc(x.subject)||'(no subject)'}</div>
@@ -228,6 +264,7 @@ async function render(){
       <div class="card">
         <div class="meta">
           <span class="status-chip st-${x.status}">${x.status}${x.block_reason?': '+esc(x.block_reason):''}</span>
+          ${x.kind==='followup'?'<span class="status-chip st-simulated">follow-up</span>':''}
           <strong>${esc(x.from_name||x.from_address)}</strong>
           <span class="sub">${esc(x.subject)||'(no subject)'} · ${fmtTime(x.updated_at)}</span></div>
         <details class="orig"><summary>Show reply</summary><pre>${esc(x.body)}</pre></details>
@@ -297,9 +334,40 @@ async function discard(id){ await api(`/api/drafts/${id}/discard`,'POST',{}); re
 async function ackErrors(){ await api(`/api/errors/${lastErrId}/ack`,'POST',{}); refresh(); }
 async function pollNow(){ await api('/api/poll-now','POST',{}); toast('Checking mail…'); setTimeout(refresh, 4000); }
 
+async function openPeople(){
+  const d = await api('/api/contacts');
+  $('contactList').innerHTML = d.contacts.length
+    ? d.contacts.map(c => `<div class="card" style="padding:10px 14px;margin-bottom:8px">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <span class="status-chip ${c.rule==='vip'?'st-sent':c.rule==='auto_skip'?'st-blocked':'st-simulated'}">${c.rule==='vip'?'★ VIP':c.rule.replace('_',' ')}</span>
+          <strong style="font-size:0.9rem">${esc(c.name||c.address)}</strong>
+          <span style="flex:1;font-size:0.82rem;color:var(--soft)">${esc(c.address)}${c.notes?' · '+esc(c.notes.slice(0,60)):''}</span>
+          <button class="btn secondary" onclick='editContact(${JSON.stringify(c).replace(/'/g,"&#39;")})'>Edit</button>
+          <button class="btn danger" onclick="delContact(${c.id})">Remove</button>
+        </div></div>`).join('')
+    : '<p style="color:var(--soft);font-size:0.88rem">No people saved yet.</p>';
+  $('peopleDlg').showModal();
+}
+function editContact(c){
+  $('pAddress').value=c.address; $('pName').value=c.name||'';
+  $('pRule').value=c.rule; $('pNotes').value=c.notes||'';
+}
+async function saveContact(){
+  const r = await api('/api/contacts','POST',{
+    address:$('pAddress').value, name:$('pName').value,
+    rule:$('pRule').value, notes:$('pNotes').value});
+  if (r.ok){ $('pAddress').value=$('pName').value=$('pNotes').value=''; $('pRule').value='normal';
+    toast('Saved'); openPeople(); }
+  else toast(r.detail||'Could not save');
+}
+async function delContact(id){ await api(`/api/contacts/${id}`,'DELETE'); openPeople(); }
+
 function openSettings(){
   $('setLive').checked = !!state.live_send;
   $('setAutostart').checked = !!state.autostart_installed;
+  $('setNotify').checked = !!state.notify_enabled;
+  $('setCooldown').value = state.notify_cooldown_minutes ?? 30;
+  $('setFollowup').value = state.followup_days ?? 3;
   $('setSignature').value = state.signature_name||'';
   $('setTone').value = state.tone_notes||'';
   $('setIgnore').value = (state.ignore_senders||[]).join(', ');
@@ -313,6 +381,9 @@ async function saveSettings(){
     signature_name:$('setSignature').value, tone_notes:$('setTone').value,
     ignore_senders:$('setIgnore').value, only_senders:$('setOnly').value,
     poll_interval:$('setInterval').value,
+    notify_enabled:$('setNotify').checked,
+    notify_cooldown_minutes:$('setCooldown').value,
+    followup_days:$('setFollowup').value,
     app_password:$('setAppPw').value, api_key:$('setApiKey').value,
   });
   if (!!state.live_send !== $('setLive').checked)

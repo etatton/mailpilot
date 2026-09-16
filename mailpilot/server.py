@@ -68,6 +68,9 @@ def state():
         "only_senders": cfg["only_senders"],
         "poll_interval": cfg["poll_interval"],
         "autostart_installed": cfg["autostart_installed"],
+        "notify_enabled": cfg["notify_enabled"],
+        "notify_cooldown_minutes": cfg["notify_cooldown_minutes"],
+        "followup_days": cfg["followup_days"],
         "keyring_ok": cfg["keyring_ok"],
         "platform": sys.platform,
         "claude_cli": drafter.find_claude_cli(),
@@ -148,13 +151,14 @@ def _split(v) -> list[str]:
 
 # ------------------------------------------------------------- queue + history
 
-def _drafts_where(clause: str, params=()):
+def _drafts_where(clause: str, params=(), order: str = "d.updated_at DESC"):
     with db.conn() as c:
         rows = c.execute(
-            "SELECT d.id, d.body, d.status, d.block_reason, d.created_at, d.updated_at,"
-            " d.sent_at, e.from_address, e.from_name, e.subject, e.body_text, e.received_at"
+            "SELECT d.id, d.body, d.status, d.kind, d.block_reason, d.created_at,"
+            " d.updated_at, d.sent_at, e.from_address, e.from_name, e.subject,"
+            " e.body_text, e.received_at, e.vip"
             f" FROM drafts d JOIN emails e ON e.id = d.email_id WHERE {clause}"
-            " ORDER BY d.updated_at DESC LIMIT 200",
+            f" ORDER BY {order} LIMIT 200",
             params,
         ).fetchall()
     return [dict(r) for r in rows]
@@ -162,7 +166,7 @@ def _drafts_where(clause: str, params=()):
 
 @app.get("/api/queue")
 def queue():
-    return {"drafts": _drafts_where("d.status='queued'")}
+    return {"drafts": _drafts_where("d.status='queued'", order="e.vip DESC, d.updated_at DESC")}
 
 
 @app.get("/api/history")
@@ -266,6 +270,45 @@ def discard_draft(draft_id: int, request: Request):
     return {"ok": True}
 
 
+# ------------------------------------------------------------- contacts
+
+@app.get("/api/contacts")
+def contacts():
+    with db.conn() as c:
+        rows = c.execute("SELECT * FROM contacts ORDER BY address").fetchall()
+    return {"contacts": [dict(r) for r in rows]}
+
+
+@app.post("/api/contacts")
+async def upsert_contact(request: Request):
+    _require_header(request)
+    data = await request.json()
+    address = (data.get("address") or "").lower().strip()
+    if not address or " " in address:
+        raise HTTPException(400, "Enter an email address or a bare domain.")
+    rule = data.get("rule") or "normal"
+    if rule not in ("normal", "vip", "always_draft", "auto_skip"):
+        raise HTTPException(400, "Unknown rule.")
+    with db.conn() as c:
+        c.execute(
+            "INSERT INTO contacts (address, name, notes, rule, created_at)"
+            " VALUES (?,?,?,?,?)"
+            " ON CONFLICT(address) DO UPDATE SET name=excluded.name,"
+            " notes=excluded.notes, rule=excluded.rule",
+            (address, (data.get("name") or "").strip(),
+             (data.get("notes") or "").strip(), rule, db.now_iso()),
+        )
+    return {"ok": True}
+
+
+@app.delete("/api/contacts/{contact_id}")
+def delete_contact(contact_id: int, request: Request):
+    _require_header(request)
+    with db.conn() as c:
+        c.execute("DELETE FROM contacts WHERE id=?", (contact_id,))
+    return {"ok": True}
+
+
 # ------------------------------------------------------------- voice
 
 @app.get("/api/voice")
@@ -326,6 +369,12 @@ async def save_settings(request: Request):
     data = await request.json()
     allowed = {"mode", "model", "signature_name", "tone_notes", "poll_interval", "gmail_address"}
     changes = {k: v for k, v in data.items() if k in allowed}
+    if "notify_enabled" in data:
+        changes["notify_enabled"] = bool(data["notify_enabled"])
+    if "notify_cooldown_minutes" in data:
+        changes["notify_cooldown_minutes"] = max(0, int(data["notify_cooldown_minutes"] or 30))
+    if "followup_days" in data:
+        changes["followup_days"] = max(0, int(data["followup_days"] or 0))
     if "ignore_senders" in data:
         changes["ignore_senders"] = _split(data["ignore_senders"])
     if "only_senders" in data:

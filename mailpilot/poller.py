@@ -100,10 +100,27 @@ def _addr_matches(address: str, patterns: list[str]) -> bool:
     return False
 
 
-def classify(msg, from_address: str, cfg: dict) -> str:
-    """Return '' to draft, or a named skip reason."""
+def lookup_contact(from_address: str, db_file=None):
+    """Match a contacts row by exact address, then by domain. Returns Row or None."""
+    address = (from_address or "").lower().strip()
+    domain = address.split("@")[-1] if "@" in address else ""
+    with db.conn(db_file) as c:
+        row = c.execute("SELECT * FROM contacts WHERE address=?", (address,)).fetchone()
+        if row is None and domain:
+            row = c.execute("SELECT * FROM contacts WHERE address=?", (domain,)).fetchone()
+    return row
+
+
+def classify(msg, from_address: str, cfg: dict, rule: str = "normal") -> str:
+    """Return '' to draft, or a named skip reason. Contact rules outrank the
+    generic filters: auto_skip always skips; vip/always_draft always draft
+    (own mail excepted - MailPilot never replies to itself)."""
     if from_address.lower() == (cfg.get("gmail_address") or "").lower():
         return "own_address"
+    if rule == "auto_skip":
+        return "contact_rule_skip"
+    if rule in ("vip", "always_draft"):
+        return ""
     if NOREPLY_RE.search(from_address):
         return "no_reply_sender"
     if msg.get("List-Unsubscribe") or (msg.get("Precedence", "").lower() in ("bulk", "list")):
@@ -132,7 +149,9 @@ def store_email(msg, cfg: dict, db_file=None):
         received_at = email.utils.parsedate_to_datetime(date_hdr).isoformat(timespec="seconds")
     except Exception:
         received_at = db.now_iso()
-    skip_reason = classify(msg, from_address, cfg)
+    contact = lookup_contact(from_address, db_file)
+    rule = contact["rule"] if contact else "normal"
+    skip_reason = classify(msg, from_address, cfg, rule)
     status = "skipped" if skip_reason else "drafted"
     refs = (msg.get("References") or "").strip()
     with db.conn(db_file) as c:
@@ -141,10 +160,11 @@ def store_email(msg, cfg: dict, db_file=None):
             return None, "duplicate", ""
         cur = c.execute(
             "INSERT INTO emails (message_id, thread_references, from_address, from_name,"
-            " subject, body_text, received_at, processed_at, status, skip_reason)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?)",
+            " subject, body_text, received_at, processed_at, status, skip_reason, vip)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (message_id, refs, from_address, from_name, subject,
-             extract_body(msg), received_at, db.now_iso(), status, skip_reason),
+             extract_body(msg), received_at, db.now_iso(), status, skip_reason,
+             1 if rule == "vip" else 0),
         )
         return cur.lastrowid, status, skip_reason
 
@@ -157,7 +177,7 @@ def draft_for_email(email_id: int, cfg: dict, db_file=None) -> bool:
     if row is None or row["status"] != "drafted":
         return False
     try:
-        body = drafter.draft_reply(row, cfg)
+        body = drafter.draft_reply(row, cfg, db_file=db_file)
     except Exception as e:
         db.record_error("drafter", str(e), traceback.format_exc(), db_file)
         with db.conn(db_file) as c:
@@ -181,10 +201,113 @@ def draft_for_email(email_id: int, cfg: dict, db_file=None) -> bool:
     return True
 
 
+def _parse_dt(iso: str):
+    from datetime import datetime, timezone
+    try:
+        dt = datetime.fromisoformat(iso)
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
+def create_followups(cfg: dict, db_file=None) -> int:
+    """Queue a nudge draft for each SENT reply that got no response within
+    followup_days. Never for simulated sends, at most one nudge per message,
+    capped per cycle. The nudge is queued like any draft - never auto-sent."""
+    from datetime import datetime, timedelta, timezone
+    days = int(cfg.get("followup_days") or 0)
+    if days <= 0:
+        return 0
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    created = 0
+    with db.conn(db_file) as c:
+        candidates = c.execute(
+            "SELECT d.id AS draft_id, d.body AS sent_body, d.sent_at, e.*"
+            " FROM drafts d JOIN emails e ON e.id=d.email_id"
+            " WHERE d.status='sent' AND d.kind='reply'"
+            " AND NOT EXISTS (SELECT 1 FROM drafts f WHERE f.email_id=d.email_id"
+            "                 AND f.kind='followup')"
+            " ORDER BY d.sent_at DESC LIMIT 50"
+        ).fetchall()
+    for row in candidates:
+        if created >= 5:
+            break
+        sent_at = _parse_dt(row["sent_at"])
+        if sent_at is None or sent_at > cutoff:
+            continue
+        with db.conn(db_file) as c:
+            later = c.execute(
+                "SELECT received_at FROM emails WHERE lower(from_address)=lower(?)"
+                " AND id != ?", (row["from_address"], row["id"]),
+            ).fetchall()
+        if any((d := _parse_dt(r["received_at"])) and d > sent_at for r in later):
+            continue  # they answered - nothing to nudge
+        try:
+            body = drafter.draft_followup(row, row["sent_body"], days, cfg)
+        except Exception as e:
+            db.record_error("followup", str(e), traceback.format_exc(), db_file)
+            continue
+        now = db.now_iso()
+        with db.conn(db_file) as c:
+            c.execute(
+                "INSERT INTO drafts (email_id, body, status, kind, created_at, updated_at)"
+                " VALUES (?,?, 'queued', 'followup', ?, ?)",
+                (row["id"], body, now, now),
+            )
+        created += 1
+    return created
+
+
+def notify_new_drafts(cfg: dict, db_file=None) -> int:
+    """Email yourself once when new drafts are waiting. One digest per cycle,
+    rate-limited by notify_cooldown_minutes; a VIP draft bypasses the cooldown."""
+    from datetime import datetime, timedelta, timezone
+    from . import sender
+    with db.conn(db_file) as c:
+        rows = c.execute(
+            "SELECT d.id, d.kind, e.from_name, e.from_address, e.subject, e.vip"
+            " FROM drafts d JOIN emails e ON e.id=d.email_id"
+            " WHERE d.status='queued' AND d.notified=0 ORDER BY e.vip DESC, d.id"
+        ).fetchall()
+    if not rows:
+        return 0
+    if not cfg.get("notify_enabled"):
+        with db.conn(db_file) as c:  # don't stockpile a flood for later re-enabling
+            c.execute("UPDATE drafts SET notified=1 WHERE status='queued' AND notified=0")
+        return 0
+    has_vip = any(r["vip"] for r in rows)
+    if not has_vip:
+        last = _parse_dt(db.kv_get("last_notified_at", db_file))
+        cooldown = timedelta(minutes=int(cfg.get("notify_cooldown_minutes") or 30))
+        if last and datetime.now(timezone.utc) - last < cooldown:
+            return 0  # stays unnotified; rides in the next digest
+    lines = []
+    for r in rows:
+        tag = " [VIP]" if r["vip"] else (" [follow-up]" if r["kind"] == "followup" else "")
+        lines.append(f"- {r['from_name'] or r['from_address']}: \"{r['subject'] or '(no subject)'}\"{tag}")
+    n = len(rows)
+    subject = f"MailPilot: {n} draft{'s' if n != 1 else ''} waiting for review"
+    body = (
+        "These replies are drafted and waiting for your approval:\n\n"
+        + "\n".join(lines)
+        + f"\n\nReview: http://127.0.0.1:{cfg.get('ui_port') or 8765}\n"
+        "(MailPilot never sends a reply until you approve it.)"
+    )
+    if sender.send_self_notification(subject, body, cfg):
+        with db.conn(db_file) as c:
+            c.execute(
+                f"UPDATE drafts SET notified=1 WHERE id IN ({','.join('?'*n)})",
+                [r["id"] for r in rows],
+            )
+        db.kv_set("last_notified_at", db.now_iso(), db_file)
+        return n
+    return 0
+
+
 def poll_once(cfg: dict = None, db_file=None) -> dict:
     """One IMAP cycle. Returns counters for the UI/log."""
     cfg = cfg or config.load()
-    stats = {"new": 0, "skipped": 0, "drafted": 0, "retried": 0}
+    stats = {"new": 0, "skipped": 0, "drafted": 0, "retried": 0, "followups": 0, "notified": 0}
     password = config.get_secret("gmail_app_password")
     if not (cfg.get("gmail_address") and password):
         return stats
@@ -233,6 +356,14 @@ def poll_once(cfg: dict = None, db_file=None) -> dict:
             imap.logout()
         except Exception:
             pass
+    try:
+        stats["followups"] = create_followups(cfg, db_file)
+    except Exception as e:
+        db.record_error("followup", str(e), traceback.format_exc(), db_file)
+    try:
+        stats["notified"] = notify_new_drafts(cfg, db_file)
+    except Exception as e:
+        db.record_error("notify", str(e), traceback.format_exc(), db_file)
     return stats
 
 

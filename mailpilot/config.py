@@ -30,6 +30,9 @@ DEFAULTS = {
     "live_send": False,
     "ui_port": 8765,
     "autostart_installed": False,
+    "notify_enabled": True,
+    "notify_cooldown_minutes": 30,
+    "followup_days": 3,            # 0 disables follow-up nudges
     "claude_cli_path": "",
     "keyring_ok": True,
 }
