@@ -9,12 +9,14 @@
     --paper:#f4f6f7; --surface:#ffffff; --ink:#1a2732; --soft:#4c5b68;
     --line:#d8dfe4; --accent:#0e7490; --accent-ink:#0b5d74; --accent-soft:#e3f1f5;
     --ok:#1a7f37; --err:#b42318; --err-bg:#fbe9e7; --warn-bg:#faf1dc; --warn-ink:#6d5313;
+    --vac-bg:#e9e4fb; --vac-ink:#4a3a9c;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --paper:#10161c; --surface:#171f27; --ink:#dbe3ea; --soft:#93a3b1;
       --line:#2a3641; --accent:#4cbcd2; --accent-ink:#6fd0e2; --accent-soft:#12303a;
       --ok:#4ade80; --err:#f87171; --err-bg:#3a1512; --warn-bg:#2c2410; --warn-ink:#e2c479;
+      --vac-bg:#241c3a; --vac-ink:#b7a6f2;
     }
   }
   * { box-sizing:border-box; }
@@ -36,6 +38,74 @@
   .banner { padding:10px 20px; font-size:0.92rem; display:flex; gap:12px; align-items:center; }
   .banner.err { background:var(--err-bg); color:var(--err); }
   .banner.warn { background:var(--warn-bg); color:var(--warn-ink); }
+  .banner.vacation { background:var(--vac-bg); color:var(--vac-ink); font-weight:600; }
+  .snoozed-line { color:var(--soft); font-size:0.85rem; margin:0 0 10px; padding:0 2px; }
+  .split { position:relative; display:inline-block; }
+  .split-menu { position:absolute; top:calc(100% + 4px); left:0; z-index:5;
+    background:var(--surface); border:1px solid var(--line); border-radius:8px;
+    box-shadow:0 4px 14px rgba(0,0,0,0.18); display:flex; flex-direction:column;
+    min-width:120px; overflow:hidden; }
+  .split-menu button { border:none; background:none; color:var(--ink); text-align:left;
+    padding:9px 14px; font-size:0.88rem; cursor:pointer; font-family:inherit; }
+  .split-menu button:hover { background:var(--accent-soft); color:var(--accent-ink); }
+  .labs-row { display:flex; align-items:center; gap:10px; padding:10px 0;
+    border-bottom:1px solid var(--line); }
+  .labs-row:last-child { border-bottom:none; }
+  .labs-row label { display:flex; align-items:center; gap:10px; font-size:1rem;
+    font-weight:400; margin:0; flex:1; cursor:pointer; }
+  .labs-row input[type="checkbox"] { width:auto; }
+  .labs-sub { margin:0 0 0 34px; padding:6px 0 0; }
+  .labs-sub label { font-size:0.88rem; color:var(--soft); }
+  .info-tip { position:relative; display:inline-flex; }
+  .info-tip .info-icon { width:16px; height:16px; border-radius:50%; border:1px solid var(--soft);
+    color:var(--soft); font-size:0.72rem; line-height:14px; text-align:center; cursor:default;
+    flex-shrink:0; }
+  .info-tip .info-icon:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .info-tip .info-pop { position:absolute; left:0; top:calc(100% + 6px); z-index:20;
+    width:240px; background:var(--surface); color:var(--ink); border:1px solid var(--line);
+    border-radius:8px; padding:10px 12px; font-size:0.82rem; line-height:1.4; font-weight:400;
+    box-shadow:0 6px 20px rgba(0,0,0,0.18);
+    opacity:0; visibility:hidden; transform:translateY(-2px);
+    transition:opacity .12s, transform .12s; pointer-events:none; }
+  .info-tip .info-icon:hover + .info-pop,
+  .info-tip .info-icon:focus-visible + .info-pop { opacity:1; visibility:visible; transform:translateY(0); }
+  .stance-grid { display:flex; flex-direction:column; gap:10px; margin:14px 0; }
+  .stance-card { border:1px solid var(--line); border-radius:10px; padding:12px 14px; background:var(--paper); }
+  .stance-card .stance-head { display:flex; align-items:center; gap:8px; margin-bottom:4px; }
+  .stance-card .stance-label { font-weight:700; font-size:0.95rem; }
+  .stance-card .stance-rationale { color:var(--soft); font-size:0.84rem; margin:0 0 8px; }
+  .stance-card .stance-body-preview { white-space:pre-wrap; font-size:0.88rem; color:var(--ink);
+    background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:10px;
+    max-height:160px; overflow:auto; margin:0 0 8px; }
+  .stance-card .btn { font-size:0.85rem; padding:6px 12px; }
+  .st-parley { background:var(--accent-soft); color:var(--accent-ink); }
+  .parley-note { color:var(--soft); font-size:0.82rem; margin:6px 0 0; }
+  dialog.wide { max-width:980px; }
+  .pick { display:flex; gap:10px; align-items:flex-start; padding:8px 10px; border-bottom:1px solid var(--line); }
+  .pick:last-child { border-bottom:none; }
+  .pick input { width:auto; margin-top:4px; flex:none; }
+  .pick .who { flex:1; min-width:0; }
+  .pick .who b { font-weight:600; }
+  .pick .who span { display:block; color:var(--soft); font-size:0.82rem;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .three { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-top:8px; }
+  @media (max-width:820px) { .three { grid-template-columns:1fr; } }
+  .three > div { min-width:0; }
+  .three h4 { margin:0 0 6px; font-size:0.76rem; text-transform:uppercase; letter-spacing:0.06em;
+    color:var(--soft); font-weight:700; }
+  .three h4.mine { color:var(--accent-ink); }
+  .three pre { white-space:pre-wrap; font-family:inherit; font-size:0.88rem; margin:0;
+    background:var(--paper); border:1px solid var(--line); border-radius:8px; padding:10px;
+    max-height:300px; overflow:auto; }
+  .three pre.draft-col { border-color:var(--accent); }
+  .scrolls { max-height:320px; overflow:auto; border:1px solid var(--line); border-radius:8px; }
+  .drift { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:12px 14px;
+    border-bottom:1px solid var(--line); }
+  .drift:last-child { border-bottom:none; }
+  .drift .gap { font-weight:700; color:var(--warn-ink); background:var(--warn-bg);
+    border-radius:999px; padding:2px 9px; font-size:0.76rem; white-space:nowrap; }
+  .bar { height:6px; background:var(--paper); border:1px solid var(--line); border-radius:999px; overflow:hidden; }
+  .bar > i { display:block; height:100%; background:var(--accent); width:0; transition:width .3s; }
   main { max-width:860px; margin:0 auto; padding:20px; }
   .tabs { display:flex; gap:4px; border-bottom:1px solid var(--line); margin-bottom:16px; }
   .tab { background:none; border:none; padding:10px 16px; font-size:0.95rem; cursor:pointer;
@@ -60,6 +130,8 @@
   .st-sent { background:var(--accent-soft); color:var(--ok); }
   .st-simulated { background:var(--warn-bg); color:var(--warn-ink); }
   .st-discarded, .st-blocked { background:var(--err-bg); color:var(--err); }
+  .inbox-badge { font-size:0.72rem; font-weight:600; padding:2px 8px; border-radius:999px;
+    background:var(--accent-soft); color:var(--accent-ink); }
   dialog { border:1px solid var(--line); border-radius:12px; background:var(--surface); color:var(--ink);
     max-width:520px; width:92%; padding:22px; }
   dialog::backdrop { background:rgba(0,0,0,0.45); }
@@ -79,6 +151,8 @@
   <span class="spacer"></span>
   <span class="sub" id="lastPoll" style="color:var(--soft);font-size:0.82rem"></span>
   <button class="btn secondary" onclick="pollNow()">Check mail now</button>
+  <button class="btn secondary" id="rehearsalBtn" hidden onclick="openRehearsal()">Rehearsal</button>
+  <button class="btn secondary" id="radarBtn" hidden onclick="openRadar()">Radar</button>
   <button class="btn secondary" onclick="openPeople()">People</button>
   <button class="btn secondary" onclick="openVoice()">Voice</button>
   <button class="btn secondary" onclick="openSettings()">Settings</button>
@@ -89,6 +163,17 @@
 </div>
 <div class="banner warn" id="testBanner" hidden>
   <span style="flex:1">TEST MODE — approvals are simulated, nothing is sent. Approve one practice draft, then go live in Settings.</span>
+</div>
+<div class="banner vacation" id="vacationBanner" hidden>
+  <span style="flex:1">🌴 VACATION MODE — mail is collected and classified, but nothing is drafted. Turn off in Settings to resume.</span>
+</div>
+<div class="banner warn" id="updateBanner" hidden>
+  <span style="flex:1">
+    A new version is available: <strong id="updateVersion"></strong>.
+    <a id="updateLink" href="#" target="_blank" rel="noopener"
+       style="color:inherit;text-decoration:underline">See what's new</a>
+  </span>
+  <button class="btn secondary" onclick="dismissUpdate()">Dismiss</button>
 </div>
 
 <main>
@@ -112,6 +197,16 @@
   <label style="display:flex;gap:10px;align-items:center;font-size:1rem">
     <input type="checkbox" id="setNotify" style="width:auto"> Email me when drafts are waiting
   </label>
+  <label style="display:flex;gap:10px;align-items:center;font-size:1rem">
+    <input type="checkbox" id="setVacation" style="width:auto"> Vacation mode — collect mail, draft nothing
+  </label>
+  <div style="display:flex;gap:12px">
+    <span style="flex:1"><label for="setQuietStart">Quiet hours start</label>
+    <input type="time" id="setQuietStart"></span>
+    <span style="flex:1"><label for="setQuietEnd">Quiet hours end</label>
+    <input type="time" id="setQuietEnd"></span>
+  </div>
+  <p style="color:var(--soft);font-size:0.82rem;margin:2px 0 14px">Pauses the "drafts are waiting" email during this window — drafting itself keeps running. Leave both blank to turn off. Can cross midnight (e.g. 22:00 → 07:00).</p>
   <div style="display:flex;gap:12px">
     <span style="flex:1"><label for="setCooldown">Notify at most every (min)</label>
     <input type="number" id="setCooldown" min="0"></span>
@@ -128,12 +223,93 @@
   <input type="text" id="setOnly">
   <label for="setInterval">Check every (seconds)</label>
   <input type="number" id="setInterval" min="60">
+  <details style="margin-top:14px"><summary style="cursor:pointer;color:var(--accent-ink);font-weight:600">Inboxes</summary>
+    <p style="color:var(--soft);font-size:0.88rem;margin:8px 0 0">MailPilot watches every inbox listed here, and each reply goes out from the inbox it arrived in. The first one is the primary — it's where MailPilot emails you about waiting drafts.</p>
+    <div id="inboxList" style="margin-top:10px"></div>
+    <label for="inboxAddress">Add another Gmail address</label>
+    <input type="text" id="inboxAddress" placeholder="you@yourdomain.com">
+    <div style="display:flex;gap:12px">
+      <span style="flex:1"><label for="inboxAppPw">Its app password</label>
+      <input type="password" id="inboxAppPw" placeholder="16 characters"></span>
+      <span style="flex:1"><label for="inboxLabel">Label (optional)</label>
+      <input type="text" id="inboxLabel" placeholder="Work"></span>
+    </div>
+    <div class="actions" style="justify-content:flex-end">
+      <button class="btn" id="addInboxBtn" onclick="addInbox()">Add inbox</button>
+    </div>
+  </details>
   <details style="margin-top:14px"><summary style="cursor:pointer;color:var(--accent-ink);font-weight:600">Update credentials</summary>
     <label for="setAppPw">New Gmail app password</label>
     <input type="password" id="setAppPw" placeholder="leave blank to keep current">
     <label for="setApiKey">New Anthropic API key</label>
     <input type="password" id="setApiKey" placeholder="leave blank to keep current">
   </details>
+  <div style="margin-top:18px">
+    <h3 style="margin:0 0 2px;font-size:0.95rem">Labs</h3>
+    <p style="color:var(--soft);font-size:0.82rem;margin:0 0 4px">Experimental. Off by default — turn one on to try it.</p>
+    <div class="labs-row">
+      <label for="labsNegotiation">
+        <input type="checkbox" id="labsNegotiation" onchange="onLabsNegotiationToggle()">
+        Negotiation Copilot
+        <span class="info-tip">
+          <span class="info-icon" tabindex="0" aria-label="What is Negotiation Copilot?">i</span>
+          <span class="info-pop">Drafts three reply stances — anchor high, meet in the middle, walk away — for emails that are really negotiations.</span>
+        </span>
+      </label>
+    </div>
+    <div class="labs-sub" id="labsNegotiationSub" hidden>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="labsNegotiationAutodetect" style="width:auto">
+        Auto-detect negotiations (draft the three stances automatically, without clicking Negotiate)
+      </label>
+    </div>
+    <div class="labs-row">
+      <label for="labsRehearsal">
+        <input type="checkbox" id="labsRehearsal">
+        Rehearsal
+        <span class="info-tip">
+          <span class="info-icon" tabindex="0" aria-label="What is Rehearsal?">i</span>
+          <span class="info-pop">Replays email you already answered: MailPilot drafts its reply next to what you actually sent, so you can judge it — and tune your voice — with zero risk.</span>
+        </span>
+      </label>
+    </div>
+    <div class="labs-row">
+      <label for="labsRadar">
+        <input type="checkbox" id="labsRadar">
+        Relationship Radar
+        <span class="info-tip">
+          <span class="info-icon" tabindex="0" aria-label="What is Relationship Radar?">i</span>
+          <span class="info-pop">Notices people you used to write regularly but haven't in months, and offers a reconnection draft.</span>
+        </span>
+      </label>
+    </div>
+    <div class="labs-row">
+      <label for="labsParley">
+        <input type="checkbox" id="labsParley">
+        Parley
+        <span class="info-tip">
+          <span class="info-icon" tabindex="0" aria-label="What is Parley?">i</span>
+          <span class="info-pop">When both sides run MailPilot, the two apps settle a meeting time between themselves — checking each proposal against your availability — and stop after three rounds. Every message still needs your approval before it sends.</span>
+        </span>
+      </label>
+    </div>
+    <label for="setParleyAvail" style="margin-top:10px">My availability for Parley scheduling</label>
+    <input type="text" id="setParleyAvail" placeholder="e.g. Tue+Thu 13:00-17:00, Fri mornings">
+    <p style="color:var(--soft);font-size:0.82rem;margin:4px 0 0">
+      Free text. Understands <code>Mon-Fri 9-5</code>, <code>Tue+Thu 13:00-17:00</code>,
+      <code>Fri mornings</code>, <code>weekdays after 2pm</code>, plus a meeting length
+      (<code>30 min</code>, <code>1 hour</code>) and a timezone (<code>ET</code>).
+      Parley never proposes a time outside this. Left blank it assumes Mon–Fri, 9–5,
+      30 minutes.
+    </p>
+  </div>
+  <div class="actions" style="margin-top:14px;justify-content:flex-start">
+    <button class="btn secondary" onclick="exportDiagnostics()">Export diagnostics</button>
+  </div>
+  <p style="color:var(--soft);font-size:0.82rem;margin:4px 0 8px">
+    Downloads a plaintext report — config presence (no secret values), mail/draft
+    counts, recent errors, and a scrubbed log tail — to attach when reporting a problem.
+  </p>
   <div class="actions" style="margin-top:18px;justify-content:space-between">
     <button class="btn danger" onclick="quitApp()">Quit MailPilot</button>
     <span>
@@ -186,6 +362,53 @@
   </div>
 </dialog>
 
+<dialog id="rehearsalDlg" class="wide">
+  <h2 style="margin:0 0 6px;font-size:1.15rem">Rehearsal</h2>
+  <p style="color:var(--soft);font-size:0.9rem;margin:0 0 12px">
+    Pick replies you have already sent. MailPilot drafts its own reply to the same email, and you
+    read the two side by side. Nothing is sent, and nothing is queued — this is a mirror, not an outbox.
+  </p>
+  <div id="rehSetup">
+    <div class="actions" style="margin-bottom:8px">
+      <button class="btn secondary" id="rehLoadBtn" onclick="loadCandidates()">Load recent sent mail</button>
+      <span style="flex:1"></span>
+      <button class="btn" id="rehRunBtn" onclick="runRehearsal()" disabled>Rehearse selected</button>
+    </div>
+    <div class="scrolls" id="rehCandidates">
+      <p style="color:var(--soft);font-size:0.88rem;padding:14px">Load your Sent folder to choose messages. Only replies are listed — a rehearsal needs the email you were answering.</p>
+    </div>
+    <p style="color:var(--soft);font-size:0.8rem;margin:8px 0 0">Up to 10 at a time. Each one is a real drafting call, so a full run can take a couple of minutes.</p>
+  </div>
+  <div id="rehResults" style="margin-top:16px"></div>
+  <div class="actions" style="justify-content:flex-end;margin-top:14px">
+    <button class="btn secondary" onclick="document.getElementById('rehearsalDlg').close()">Close</button>
+  </div>
+</dialog>
+
+<dialog id="radarDlg" class="wide">
+  <h2 style="margin:0 0 6px;font-size:1.15rem">Relationship Radar</h2>
+  <p style="color:var(--soft);font-size:0.9rem;margin:0 0 12px">
+    People you used to hear from on a rhythm, and haven't in a while. Radar reads message headers
+    only — who and when, never what was said.
+  </p>
+  <div id="radarBackfill" style="margin-bottom:12px"></div>
+  <div class="scrolls" id="radarList">
+    <p style="color:var(--soft);font-size:0.88rem;padding:14px">Loading…</p>
+  </div>
+  <div class="actions" style="justify-content:flex-end;margin-top:14px">
+    <button class="btn secondary" onclick="document.getElementById('radarDlg').close()">Close</button>
+  </div>
+</dialog>
+
+<dialog id="negotiateDlg">
+  <h2 style="margin:0 0 6px;font-size:1.1rem">Negotiation stances</h2>
+  <p style="color:var(--soft);font-size:0.88rem;margin:0 0 4px" id="negotiateStatus">Drafting three stances…</p>
+  <div class="stance-grid" id="negotiateStances"></div>
+  <div class="actions" style="justify-content:flex-end">
+    <button class="btn secondary" onclick="document.getElementById('negotiateDlg').close()">Close</button>
+  </div>
+</dialog>
+
 <dialog id="regenDlg">
   <h2 style="margin:0 0 10px;font-size:1.1rem">Redraft this reply</h2>
   <div class="actions">
@@ -217,12 +440,20 @@ let tab='queue', state={}, lastErrId=0;
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'), 2600); }
 function fmtTime(iso){ if(!iso) return ''; try{ return new Date(iso).toLocaleString(); }catch(e){ return iso; } }
+// Only worth the pixels once there's more than one inbox to tell apart.
+function multiInbox(){ return (state.accounts||[]).length > 1; }
+function inboxBadge(x){ return (multiInbox() && x.account)
+  ? `<span class="inbox-badge" title="Arrived in this inbox">${esc(x.account)}</span>` : ''; }
 
 async function refresh(){
   state = await api('/api/state');
   $('modePill').className = 'pill ' + (state.live_send?'live':'test');
   $('modePill').textContent = state.live_send ? 'LIVE' : 'TEST MODE';
   $('testBanner').hidden = !!state.live_send;
+  $('vacationBanner').hidden = !state.vacation_mode;
+  $('rehearsalBtn').hidden = !state.feature_rehearsal;
+  $('radarBtn').hidden = !state.feature_radar;
+  renderUpdateBanner();
   $('lastPoll').textContent = state.last_poll ? ('Last check: ' + fmtTime(state.last_poll)) : 'First check pending…';
   const errs = await api('/api/errors');
   if (errs.errors.length){
@@ -242,21 +473,38 @@ async function render(){
   if (tab==='queue'){
     const d = await api('/api/queue');
     $('qCount').textContent = d.drafts.length ? '('+d.drafts.length+')' : '';
-    if (!d.drafts.length){ box.innerHTML = '<div class="empty">Queue is clear. New drafts appear here after each mail check.</div>'; return; }
-    box.innerHTML = d.drafts.map(x => `
+    let html = d.snoozed_count ? `<div class="snoozed-line">💤 ${d.snoozed_count} snoozed</div>` : '';
+    if (!d.drafts.length){
+      box.innerHTML = html + '<div class="empty">Queue is clear. New drafts appear here after each mail check.</div>';
+      return;
+    }
+    html += d.drafts.map(x => `
       <div class="card" id="card${x.id}">
-        <div class="meta">${x.vip?'<span class="status-chip st-sent">★ VIP</span>':''}${x.kind==='followup'?'<span class="status-chip st-simulated">follow-up</span>':''}<strong>${esc(x.from_name||x.from_address)}</strong>
+        <div class="meta">${x.vip?'<span class="status-chip st-sent">★ VIP</span>':''}${x.kind==='followup'?'<span class="status-chip st-simulated">follow-up</span>':''}${x.kind==='reconnect'?'<span class="status-chip st-simulated">reconnect</span>':''}${parleyChip(x)}${x.snoozed_until?'<span class="status-chip st-simulated">⏰ returned from snooze</span>':''}<strong>${esc(x.from_name||x.from_address)}</strong>
           <span class="sub">${esc(x.from_address)}</span>
-          <span class="sub">· ${fmtTime(x.received_at)}</span></div>
+          <span class="sub">· ${fmtTime(x.received_at)}</span>${inboxBadge(x)}</div>
         <div style="font-weight:600;margin-bottom:6px">${esc(x.subject)||'(no subject)'}</div>
+        ${x.kind==='parley' && parleyMeta(x) ? `<p class="parley-note">${esc(parleyLine(parleyMeta(x)))}</p>` : ''}
         <details class="orig"><summary>Show original email</summary><pre>${esc(x.body_text)}</pre></details>
         <textarea class="draft" id="body${x.id}">${esc(x.body)}</textarea>
+        ${x.kind==='parley' ? `<p class="parley-note">The scheduling data block at the end of the draft is what the other assistant reads. Edit the wording freely; leave the block alone.</p>` : ''}
         <div class="actions">
           <button class="btn" onclick="approve(${x.id})">Approve &amp; Send</button>
           <button class="btn secondary" onclick="regen(${x.id})">Regenerate…</button>
+          ${state.feature_negotiation ? `<button class="btn secondary" onclick="negotiate(${x.id})">Negotiate</button>` : ''}
+          ${state.feature_parley && x.kind !== 'parley' ? `<button class="btn secondary" onclick="parleyThis(${x.id})" title="Rewrite this as a scheduling proposal with times from your availability, so the other side's assistant can answer it.">Parley this</button>` : ''}
+          <span class="split">
+            <button class="btn secondary" onclick="toggleSnoozeMenu(${x.id})">Snooze ▾</button>
+            <span class="split-menu" id="snoozeMenu${x.id}" hidden>
+              <button onclick="snooze(${x.id},'1d')">1 day</button>
+              <button onclick="snooze(${x.id},'3d')">3 days</button>
+              <button onclick="snooze(${x.id},'1w')">1 week</button>
+            </span>
+          </span>
           <button class="btn danger" onclick="discard(${x.id})">Discard</button>
         </div>
       </div>`).join('');
+    box.innerHTML = html;
   } else if (tab==='history'){
     const d = await api('/api/history');
     if (!d.drafts.length){ box.innerHTML = '<div class="empty">Nothing here yet.</div>'; return; }
@@ -265,8 +513,10 @@ async function render(){
         <div class="meta">
           <span class="status-chip st-${x.status}">${x.status}${x.block_reason?': '+esc(x.block_reason):''}</span>
           ${x.kind==='followup'?'<span class="status-chip st-simulated">follow-up</span>':''}
+          ${x.kind==='reconnect'?'<span class="status-chip st-simulated">reconnect</span>':''}
+          ${x.kind==='parley'?'<span class="status-chip st-parley">parley</span>':''}
           <strong>${esc(x.from_name||x.from_address)}</strong>
-          <span class="sub">${esc(x.subject)||'(no subject)'} · ${fmtTime(x.updated_at)}</span></div>
+          <span class="sub">${esc(x.subject)||'(no subject)'} · ${fmtTime(x.updated_at)}</span>${inboxBadge(x)}</div>
         <details class="orig"><summary>Show reply</summary><pre>${esc(x.body)}</pre></details>
       </div>`).join('');
   } else {
@@ -276,7 +526,7 @@ async function render(){
       <div class="card">
         <div class="meta"><span class="status-chip st-simulated">${esc(x.skip_reason)}</span>
           <strong>${esc(x.from_name||x.from_address)}</strong>
-          <span class="sub">${esc(x.subject)||'(no subject)'} · ${fmtTime(x.received_at)}</span></div>
+          <span class="sub">${esc(x.subject)||'(no subject)'} · ${fmtTime(x.received_at)}</span>${inboxBadge(x)}</div>
       </div>`).join('');
   }
 }
@@ -366,15 +616,58 @@ function openSettings(){
   $('setLive').checked = !!state.live_send;
   $('setAutostart').checked = !!state.autostart_installed;
   $('setNotify').checked = !!state.notify_enabled;
+  $('setVacation').checked = !!state.vacation_mode;
+  $('setQuietStart').value = state.quiet_start || '';
+  $('setQuietEnd').value = state.quiet_end || '';
   $('setCooldown').value = state.notify_cooldown_minutes ?? 30;
   $('setFollowup').value = state.followup_days ?? 3;
+  $('labsNegotiation').checked = !!state.feature_negotiation;
+  $('labsNegotiationAutodetect').checked = !!state.negotiation_autodetect;
+  $('labsNegotiationSub').hidden = !state.feature_negotiation;
+  $('labsRehearsal').checked = !!state.feature_rehearsal;
+  $('labsRadar').checked = !!state.feature_radar;
+  $('labsParley').checked = !!state.feature_parley;
+  $('setParleyAvail').value = state.parley_availability || '';
   $('setSignature').value = state.signature_name||'';
   $('setTone').value = state.tone_notes||'';
   $('setIgnore').value = (state.ignore_senders||[]).join(', ');
   $('setOnly').value = (state.only_senders||[]).join(', ');
   $('setInterval').value = state.poll_interval||300;
   $('setAppPw').value=''; $('setApiKey').value='';
+  $('inboxAddress').value=''; $('inboxAppPw').value=''; $('inboxLabel').value='';
+  renderInboxes();
   $('settingsDlg').showModal();
+}
+
+async function renderInboxes(){
+  const d = await api('/api/accounts');
+  state.accounts = d.accounts;
+  $('inboxList').innerHTML = d.accounts.length
+    ? d.accounts.map((a, i) => `<div class="card" style="padding:10px 14px;margin-bottom:8px">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <span class="inbox-badge">${i===0?'primary':esc(a.label||'inbox')}</span>
+          <span style="flex:1;font-size:0.88rem">${esc(a.address)}</span>
+          ${i===0?'' : `<button class="btn danger" onclick="delInbox(${a.id})">Remove</button>`}
+        </div></div>`).join('')
+    : '<p style="color:var(--soft);font-size:0.88rem">No inboxes connected yet.</p>';
+}
+async function addInbox(){
+  const btn = $('addInboxBtn');
+  btn.disabled = true; btn.textContent = 'Checking with Gmail…';
+  const r = await api('/api/accounts','POST',{
+    address:$('inboxAddress').value, app_password:$('inboxAppPw').value,
+    label:$('inboxLabel').value});
+  btn.disabled = false; btn.textContent = 'Add inbox';
+  if (r.ok){
+    $('inboxAddress').value=''; $('inboxAppPw').value=''; $('inboxLabel').value='';
+    toast(r.message||'Inbox added'); renderInboxes();
+  } else toast(r.message || r.detail || 'Could not add that inbox');
+}
+async function delInbox(id){
+  if (!confirm('Remove this inbox? Mail already drafted from it stays in your history.')) return;
+  const r = await api(`/api/accounts/${id}`,'DELETE');
+  toast(r.message || r.detail || 'Removed');
+  renderInboxes();
 }
 async function saveSettings(){
   await api('/api/settings','POST',{
@@ -384,6 +677,15 @@ async function saveSettings(){
     notify_enabled:$('setNotify').checked,
     notify_cooldown_minutes:$('setCooldown').value,
     followup_days:$('setFollowup').value,
+    quiet_start:$('setQuietStart').value,
+    quiet_end:$('setQuietEnd').value,
+    vacation_mode:$('setVacation').checked,
+    feature_negotiation:$('labsNegotiation').checked,
+    negotiation_autodetect:$('labsNegotiationAutodetect').checked,
+    feature_rehearsal:$('labsRehearsal').checked,
+    feature_radar:$('labsRadar').checked,
+    feature_parley:$('labsParley').checked,
+    parley_availability:$('setParleyAvail').value,
     app_password:$('setAppPw').value, api_key:$('setApiKey').value,
   });
   if (!!state.live_send !== $('setLive').checked)
@@ -398,6 +700,259 @@ async function quitApp(){
   if (!confirm('Quit MailPilot? Mail watching stops until it starts again.')) return;
   await api('/api/quit','POST',{});
   document.body.innerHTML = '<div class="empty" style="padding-top:120px">MailPilot has shut down. You can close this tab.</div>';
+}
+
+// ---- snooze split-button ----
+function toggleSnoozeMenu(id){
+  const mine = $('snoozeMenu'+id);
+  const wasHidden = mine.hidden;
+  document.querySelectorAll('.split-menu').forEach(m => { m.hidden = true; });
+  mine.hidden = !wasHidden;
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('.split')) document.querySelectorAll('.split-menu').forEach(m => m.hidden = true);
+});
+async function snooze(id, option){
+  $('snoozeMenu'+id).hidden = true;
+  const label = {'1d':'1 day','3d':'3 days','1w':'1 week'}[option] || option;
+  const r = await api(`/api/drafts/${id}/snooze`,'POST',{option});
+  if (r.ok) toast('Snoozed for ' + label);
+  else toast('Could not snooze: ' + (r.detail || 'unknown error'));
+  refresh();
+}
+
+// ---- update banner + diagnostics ----
+function renderUpdateBanner(){
+  const u = state.update;
+  if (!u || !u.newer){ $('updateBanner').hidden = true; return; }
+  let dismissed = '';
+  try { dismissed = localStorage.getItem('mailpilot_update_dismissed') || ''; } catch(e) {}
+  if (dismissed === u.latest){ $('updateBanner').hidden = true; return; }
+  $('updateVersion').textContent = 'v' + u.latest;
+  $('updateLink').href = u.url || '#';
+  $('updateBanner').hidden = false;
+}
+function dismissUpdate(){
+  if (state.update && state.update.latest){
+    try { localStorage.setItem('mailpilot_update_dismissed', state.update.latest); } catch(e) {}
+  }
+  $('updateBanner').hidden = true;
+}
+function exportDiagnostics(){ window.open('/api/diagnostics', '_blank'); }
+
+// ---- Labs ----
+function onLabsNegotiationToggle(){
+  $('labsNegotiationSub').hidden = !$('labsNegotiation').checked;
+}
+
+/* ---------------------------------------------------------------- Rehearsal */
+let rehCands = [];
+
+async function openRehearsal(){
+  $('rehCandidates').innerHTML = '<p style="color:var(--soft);font-size:0.88rem;padding:14px">Load your Sent folder to choose messages. Only replies are listed — a rehearsal needs the email you were answering.</p>';
+  $('rehRunBtn').disabled = true;
+  rehCands = [];
+  $('rehearsalDlg').showModal();
+  renderRehearsals();
+}
+
+async function loadCandidates(){
+  const b = $('rehLoadBtn'); b.disabled = true; b.textContent = 'Reading Sent…';
+  const d = await api('/api/rehearsal/candidates');
+  b.disabled = false; b.textContent = 'Load recent sent mail';
+  if (d.ok === false){ toast('Could not read Sent: ' + (d.message||'')); return; }
+  rehCands = d.candidates || [];
+  if (!rehCands.length){
+    $('rehCandidates').innerHTML = '<p style="color:var(--soft);font-size:0.88rem;padding:14px">No replies found in Sent yet.</p>';
+    return;
+  }
+  $('rehCandidates').innerHTML = rehCands.map((c,i) => `
+    <label class="pick">
+      <input type="checkbox" class="rehPick" value="${i}" onchange="rehPicked()">
+      <span class="who">
+        <b>${esc(c.subject)||'(no subject)'}</b>
+        <span>to ${esc(c.to)} · ${fmtTime(c.date)}</span>
+      </span>
+    </label>`).join('');
+  rehPicked();
+}
+
+function rehPicked(){
+  const n = document.querySelectorAll('.rehPick:checked').length;
+  const b = $('rehRunBtn');
+  b.disabled = n === 0 || n > 10;
+  b.textContent = n > 10 ? 'Pick 10 or fewer' : (n ? `Rehearse ${n} selected` : 'Rehearse selected');
+}
+
+async function runRehearsal(){
+  const picks = [...document.querySelectorAll('.rehPick:checked')]
+    .map(el => rehCands[+el.value])
+    .map(c => ({seq: c.seq, message_id: c.message_id}));
+  if (!picks.length) return;
+  const b = $('rehRunBtn'); b.disabled = true; b.textContent = 'Drafting…';
+  const r = await api('/api/rehearsal/run','POST',{seqs: picks});
+  b.textContent = 'Rehearse selected'; rehPicked();
+  if (r.ok === false){ toast('Rehearsal failed: ' + (r.message||'')); return; }
+  let msg = `${r.created} rehearsed`;
+  if (r.missing_original) msg += ` · ${r.missing_original} original${r.missing_original>1?'s':''} not found`;
+  if (r.failed) msg += ` · ${r.failed} failed`;
+  toast(msg);
+  document.querySelectorAll('.rehPick:checked').forEach(el => el.checked = false);
+  rehPicked();
+  renderRehearsals();
+}
+
+async function renderRehearsals(){
+  const d = await api('/api/rehearsal/results');
+  const box = $('rehResults');
+  if (!d.rehearsals || !d.rehearsals.length){ box.innerHTML = ''; return; }
+  box.innerHTML = d.rehearsals.map(x => `
+    <div class="card">
+      <div class="meta"><strong>${esc(x.from_address)}</strong>
+        <span class="sub">${esc(x.subject)||'(no subject)'} · ${fmtTime(x.created_at)}</span></div>
+      <div class="three">
+        <div><h4>Their email</h4><pre>${esc(x.inbound_excerpt)}</pre></div>
+        <div><h4 class="mine">MailPilot's draft</h4><pre class="draft-col">${esc(x.draft)}</pre></div>
+        <div><h4>What you actually sent</h4><pre>${esc(x.actual_reply)}</pre></div>
+      </div>
+      <div class="actions" style="justify-content:flex-end">
+        <button class="btn secondary" onclick="useAsVoiceSample(${x.id}, this)">Use your reply as a voice sample</button>
+      </div>
+    </div>`).join('');
+}
+
+async function useAsVoiceSample(id, btn){
+  btn.disabled = true;
+  const r = await api(`/api/rehearsal/${id}/save-voice-sample`,'POST',{});
+  if (r.ok){ btn.textContent = 'Saved to your voice'; toast('Added to your writing samples'); }
+  else { btn.disabled = false; toast(r.detail || 'Could not save that one'); }
+}
+
+/* -------------------------------------------------------------------- Radar */
+let radarPoll = null;
+
+async function openRadar(){
+  $('radarDlg').showModal();
+  loadRadar();
+}
+
+async function loadRadar(){
+  const d = await api('/api/radar');
+  let prog = null;
+  try { prog = d.progress ? JSON.parse(d.progress) : null; } catch(e) {}
+  const running = prog && prog.phase !== 'done' && !d.backfilled;
+
+  $('radarBackfill').innerHTML = d.backfilled && !running
+    ? `<div style="display:flex;gap:10px;align-items:center;font-size:0.86rem;color:var(--soft)">
+         <span style="flex:1">History scanned. New mail is logged as it arrives.</span>
+         <button class="btn secondary" onclick="radarBackfillRun(true)">Rescan</button></div>`
+    : running
+      ? `<div style="font-size:0.86rem;color:var(--soft)">
+           Reading mail headers — ${prog.done} of ${prog.total} in ${esc(prog.phase||'')}. This can take a few minutes; you can close this window.
+           <div class="bar" style="margin-top:6px"><i style="width:${prog.total?Math.round(100*prog.done/prog.total):0}%"></i></div></div>`
+      : `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+           <span style="flex:1;font-size:0.86rem;color:var(--soft)">Radar needs a one-off scan of the last 12 months of headers before it can tell a lapse from a quiet week. Minutes, not seconds.</span>
+           <button class="btn" onclick="radarBackfillRun(false)">Scan my history</button></div>`;
+
+  const list = d.drifted || [];
+  $('radarList').innerHTML = list.length ? list.map(x => `
+    <div class="drift">
+      <span class="gap">${x.weeks_since} weeks quiet</span>
+      <span style="flex:1;min-width:180px">
+        <strong>${esc(x.name_hint)}</strong>
+        <span style="display:block;color:var(--soft);font-size:0.82rem">${esc(x.address)} · ${esc(x.baseline)} · last ${fmtTime(x.last_contact_iso)}</span>
+      </span>
+      <button class="btn" onclick='radarReconnect(${JSON.stringify(x).replace(/'/g,"&#39;")}, this)'>Draft a reconnection</button>
+      <button class="btn secondary" onclick="radarDismiss('${esc(x.address)}')">Dismiss</button>
+    </div>`).join('')
+    : `<p style="color:var(--soft);font-size:0.88rem;padding:14px">${d.backfilled ? 'Nobody has drifted. Every regular correspondent has been in touch within the last two months.' : 'Nothing to show until the history scan has run.'}</p>`;
+
+  clearTimeout(radarPoll);
+  if (running) radarPoll = setTimeout(loadRadar, 4000);
+}
+
+async function radarBackfillRun(force){
+  const r = await api('/api/radar/backfill','POST',{account_address: state.gmail_address || '', force: !!force});
+  toast(r.status === 'already_running' ? 'Already scanning…' : 'Scanning your mail history…');
+  setTimeout(loadRadar, 1500);
+}
+
+async function radarDismiss(address){
+  await api('/api/radar/dismiss','POST',{address, days:90});
+  toast('Hidden for 90 days');
+  loadRadar();
+}
+
+async function radarReconnect(contact, btn){
+  btn.disabled = true; btn.textContent = 'Drafting…';
+  const r = await api('/api/radar/reconnect','POST',{
+    address: contact.address, name_hint: contact.name_hint, weeks_since: contact.weeks_since});
+  btn.disabled = false; btn.textContent = 'Draft a reconnection';
+  if (r.ok){
+    toast('Drafted — it is waiting in your queue for approval');
+    $('radarDlg').close();
+    setTab('queue'); refresh();
+  } else toast('Could not draft that: ' + (r.message||''));
+}
+
+// ---- parley ----
+function parleyMeta(x){
+  if (x.kind !== 'parley') return null;
+  try { return JSON.parse(x.meta_json || 'null'); } catch(e){ return null; }
+}
+function parleyChip(x){
+  const m = parleyMeta(x);
+  if (!m) return x.kind === 'parley' ? '<span class="status-chip st-parley">parley</span>' : '';
+  const label = m.state === 'accept' ? 'parley · accepting' : `parley · round ${m.round}`;
+  return `<span class="status-chip st-parley" title="${esc(parleyLine(m))}">${esc(label)}</span>`;
+}
+function parleyLine(m){
+  if (m.state === 'accept' && m.chosen)
+    return `Agreeing to ${m.chosen.day} ${m.chosen.date} at ${m.chosen.time} (${m.chosen.dur} min).`;
+  const times = (m.slots||[]).map(s => `${s.day} ${s.date} ${s.time}`).join(', ');
+  return `Offering: ${times || 'no times'}. Round ${m.round} of 3 — after that it comes to you.`;
+}
+async function parleyThis(id){
+  const btns = document.querySelectorAll(`#card${id} .btn`);
+  btns.forEach(b => b.disabled = true);
+  toast('Building a scheduling proposal…');
+  const r = await api(`/api/drafts/${id}/parley`, 'POST', {});
+  if (r.ok) toast('Proposal drafted — review the times, then approve.');
+  else toast(r.message || r.detail || 'Could not start a parley');
+  refresh();
+}
+
+// ---- negotiation stance picker ----
+let negotiateDraftId = null;
+async function negotiate(id){
+  negotiateDraftId = id;
+  $('negotiateStatus').textContent = 'Drafting three stances…';
+  $('negotiateStances').innerHTML = '';
+  $('negotiateDlg').showModal();
+  const r = await api(`/api/drafts/${id}/negotiate`, 'POST', {});
+  if (!r.ok){
+    $('negotiateStatus').textContent = 'Could not draft stances: ' + (r.message || 'unknown error');
+    return;
+  }
+  $('negotiateStatus').textContent = 'Pick a stance, or edit the draft after using one.';
+  $('negotiateStances').innerHTML = r.stances.map((s, i) => `
+    <div class="stance-card">
+      <div class="stance-head">
+        <span class="stance-label">${esc(s.label)}</span>
+        <span class="sub" style="text-transform:capitalize">(${esc(s.stance)})</span>
+      </div>
+      <p class="stance-rationale">${esc(s.rationale)}</p>
+      <div class="stance-body-preview">${esc(s.body)}</div>
+      <button class="btn" onclick="useStance(${i})">Use this stance</button>
+    </div>`).join('');
+  window._negotiateStances = r.stances;
+}
+async function useStance(i){
+  const s = window._negotiateStances[i];
+  await api(`/api/drafts/${negotiateDraftId}`, 'PATCH', {body: s.body});
+  document.getElementById('negotiateDlg').close();
+  toast(`Draft updated with the "${s.label}" stance`);
+  refresh();
 }
 
 refresh();

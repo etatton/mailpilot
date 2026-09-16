@@ -45,9 +45,31 @@ CREATE TABLE IF NOT EXISTS contacts (
     rule TEXT NOT NULL DEFAULT 'normal',  -- normal | vip | always_draft | auto_skip
     created_at TEXT
 );
+CREATE TABLE IF NOT EXISTS accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    address TEXT UNIQUE NOT NULL,
+    label TEXT DEFAULT '',
+    created_at TEXT
+);
 CREATE TABLE IF NOT EXISTS kv (
     key TEXT PRIMARY KEY,
     value TEXT
+);
+CREATE TABLE IF NOT EXISTS correspondence_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    address TEXT NOT NULL,
+    direction TEXT NOT NULL,           -- 'in' | 'out'
+    date TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_correspondence_address ON correspondence_log(address);
+CREATE TABLE IF NOT EXISTS rehearsals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_address TEXT DEFAULT '',
+    subject TEXT DEFAULT '',
+    inbound_excerpt TEXT DEFAULT '',
+    actual_reply TEXT DEFAULT '',
+    draft TEXT DEFAULT '',
+    created_at TEXT
 );
 CREATE TABLE IF NOT EXISTS errors (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -86,7 +108,39 @@ _COLUMN_ADDITIONS = [
     ("drafts", "notified", "INTEGER NOT NULL DEFAULT 0"),
     ("drafts", "kind", "TEXT NOT NULL DEFAULT 'reply'"),   # reply | followup
     ("emails", "vip", "INTEGER NOT NULL DEFAULT 0"),
+    # Multi-inbox: every pre-existing email belongs to the original (primary)
+    # account, which the migration below guarantees is id 1.
+    ("emails", "account_id", "INTEGER NOT NULL DEFAULT 1"),
+    ("emails", "attachments_json", "TEXT NOT NULL DEFAULT ''"),
+    ("drafts", "snoozed_until", "TEXT NOT NULL DEFAULT ''"),
+    ("drafts", "meta_json", "TEXT NOT NULL DEFAULT ''"),   # negotiation stances / parley state
 ]
+
+
+def _migrate_primary_account(c) -> None:
+    """Seed accounts from the single-inbox config, once.
+
+    Runs only when accounts is empty, so a user who has since added or removed
+    inboxes is never second-guessed. Existing emails keep account_id 1, which is
+    what the row inserted here becomes.
+    """
+    have = c.execute("SELECT COUNT(*) FROM accounts").fetchone()[0]
+    if have:
+        return
+    from . import config  # local import: config imports paths only, db does too
+    address = (config.load().get("gmail_address") or "").strip()
+    if not address:
+        return
+    c.execute(
+        "INSERT INTO accounts (id, address, label, created_at) VALUES (1,?,?,?)",
+        (address, "Primary", now_iso()),
+    )
+
+
+def ensure_primary_account(db_file=None) -> None:
+    """Self-heal: a DB with no accounts row but a configured address gets one."""
+    with conn(db_file) as c:
+        _migrate_primary_account(c)
 
 
 def bootstrap(db_file=None) -> None:
@@ -96,6 +150,7 @@ def bootstrap(db_file=None) -> None:
             have = {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
             if col not in have:
                 c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+        _migrate_primary_account(c)
 
 
 def kv_get(key: str, db_file=None) -> str:

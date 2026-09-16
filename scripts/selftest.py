@@ -26,15 +26,28 @@ def boom():
     raise AssertionError("SMTP was touched on a guarded path - a guard is broken!")
 
 
+def seed_account(dbf):
+    """Account 1 is the inbox every seeded email arrives in. Forced to the test
+    address so a real config on the machine can't leak into the fixture."""
+    with db.conn(dbf) as c:
+        c.execute(
+            "INSERT INTO accounts (id, address, label, created_at) VALUES (1,?,?,?)"
+            " ON CONFLICT(id) DO UPDATE SET address=excluded.address",
+            (CFG["gmail_address"], "Primary", db.now_iso()),
+        )
+
+
 def seed(dbf, from_address="alice@example.com", body="Thanks Alice, sounds good.\n\nPilot",
-         draft_status="queued", message_id=None, kind="reply", email_id=None):
+         draft_status="queued", message_id=None, kind="reply", email_id=None,
+         account_id=1):
     with db.conn(dbf) as c:
         if email_id is None:
             cur = c.execute(
                 "INSERT INTO emails (message_id, from_address, from_name, subject, body_text,"
-                " received_at, processed_at) VALUES (?,?,?,?,?,?,?)",
+                " received_at, processed_at, account_id) VALUES (?,?,?,?,?,?,?,?)",
                 (message_id or f"<m{c.execute('SELECT COUNT(*) FROM emails').fetchone()[0]}@x>",
-                 from_address, "Alice", "Hello", "Hi there", db.now_iso(), db.now_iso()),
+                 from_address, "Alice", "Hello", "Hi there", db.now_iso(), db.now_iso(),
+                 account_id),
             )
             email_id = cur.lastrowid
         cur = c.execute(
@@ -48,6 +61,7 @@ def seed(dbf, from_address="alice@example.com", body="Thanks Alice, sounds good.
 def main():
     tmp = Path(tempfile.mkdtemp()) / "test.db"
     db.bootstrap(tmp)
+    seed_account(tmp)
     failures = []
 
     def check(name, result, want_status, want_reason_part=""):
@@ -104,6 +118,20 @@ def main():
                  body="Another nudge. Pilot")
     check("second follow-up blocks",
           sender.send_reply(f2, live, tmp, smtp_factory=boom), "blocked", "already_sent")
+
+    # (h) a draft whose inbox no longer exists has no identity to send AS - it must
+    # block before SMTP rather than quietly falling back to some other address
+    d8, _ = seed(tmp, draft_status="approved", account_id=999)
+    check("missing account blocks",
+          sender.send_reply(d8, live, tmp, smtp_factory=boom), "blocked", "account_missing")
+
+    # (i) a Radar reconnect draft goes through the SAME guards - test mode
+    # simulates it, no special-casing around the choke-point
+    d9, _ = seed(tmp, draft_status="approved", kind="reconnect",
+                 message_id="<radar-seed-abc@mailpilot>",
+                 body="Hi Alice - been a while! How have you been?\n\nPilot")
+    check("reconnect draft simulates through the same guards",
+          sender.send_reply(d9, CFG, tmp, smtp_factory=boom), "simulated")
 
     print()
     if failures:

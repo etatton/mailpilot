@@ -10,9 +10,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+import json
+import uuid
 
-from . import VERSION, autostart, config, db, drafter, poller, sender
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+
+from . import (VERSION, autostart, config, db, drafter, negotiation, parley,
+               poller, radar, rehearsal, sender, timectl, updates)
 
 poll_loop: poller.PollLoop | None = None
 
@@ -27,6 +31,7 @@ def web_dir() -> Path:
 async def lifespan(app: FastAPI):
     global poll_loop
     db.bootstrap()
+    config.migrate_legacy_gmail_secret()
     poll_loop = poller.PollLoop()
     poll_loop.start()
     yield
@@ -52,11 +57,52 @@ def index():
     return FileResponse(web_dir() / page)
 
 
+def _account_row(address: str = ""):
+    """The accounts row for an address, or the primary inbox when none given."""
+    wanted = (address or "").strip().lower()
+    with db.conn() as c:
+        if wanted:
+            row = c.execute("SELECT * FROM accounts WHERE lower(address)=?", (wanted,)).fetchone()
+        else:
+            row = c.execute("SELECT * FROM accounts ORDER BY id LIMIT 1").fetchone()
+    if row is None:
+        raise HTTPException(400, "No such inbox.")
+    return row
+
+
+def _account_creds(address: str = "") -> tuple[str, str]:
+    row = _account_row(address)
+    pw = poller.account_password(row)
+    if not pw:
+        raise HTTPException(400, f"No app password stored for {row['address']}.")
+    return row["address"], pw
+
+
+def _feature(name: str) -> dict:
+    cfg = config.load()
+    if not cfg.get(name):
+        raise HTTPException(404, "That feature is switched off in Settings > Labs.")
+    return cfg
+
+
+def _accounts_list() -> list[dict]:
+    """Inboxes for the UI. Never carries a password - only id/address/label."""
+    try:
+        with db.conn() as c:
+            rows = c.execute(
+                "SELECT id, address, label FROM accounts ORDER BY id"
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
 @app.get("/api/state")
 def state():
     cfg = config.load()
     return {
         "version": VERSION,
+        "accounts": _accounts_list(),
         "configured": cfg["configured"],
         "mode": cfg["mode"],
         "model": cfg["model"],
@@ -71,6 +117,16 @@ def state():
         "notify_enabled": cfg["notify_enabled"],
         "notify_cooldown_minutes": cfg["notify_cooldown_minutes"],
         "followup_days": cfg["followup_days"],
+        "quiet_start": cfg["quiet_start"],
+        "quiet_end": cfg["quiet_end"],
+        "vacation_mode": cfg["vacation_mode"],
+        "feature_negotiation": cfg["feature_negotiation"],
+        "feature_rehearsal": cfg["feature_rehearsal"],
+        "feature_radar": cfg["feature_radar"],
+        "feature_parley": cfg["feature_parley"],
+        "negotiation_autodetect": cfg["negotiation_autodetect"],
+        "parley_availability": cfg["parley_availability"],
+        "update": updates.cached_check(VERSION),
         "keyring_ok": cfg["keyring_ok"],
         "platform": sys.platform,
         "claude_cli": drafter.find_claude_cli(),
@@ -124,8 +180,21 @@ async def setup_save(request: Request):
         "live_send": False,  # every new setup starts in test mode
         "claude_cli_path": drafter.find_claude_cli() if mode == "cli" else "",
     }
-    if data.get("app_password"):
-        config.set_secret("gmail_app_password", data["app_password"].replace(" ", ""))
+    address = changes["gmail_address"]
+    app_password = (data.get("app_password") or "").replace(" ", "")
+    if app_password:
+        # Legacy name kept so a downgrade still finds it; the per-account name
+        # below is what the poller and sender actually read.
+        config.set_secret("gmail_app_password", app_password)
+    if address:
+        with db.conn() as c:
+            c.execute(
+                "INSERT INTO accounts (address, label, created_at) VALUES (?,?,?)"
+                " ON CONFLICT(address) DO NOTHING",
+                (address.lower(), "Primary", db.now_iso()),
+            )
+        if app_password:
+            config.set_secret(config.gmail_secret_name(address), app_password)
     if mode == "api" and data.get("api_key"):
         config.set_secret("anthropic_api_key", data["api_key"].strip())
     sample = (data.get("writing_sample") or "").strip()
@@ -149,15 +218,80 @@ def _split(v) -> list[str]:
     return [s.strip() for s in (v or "").split(",") if s.strip()]
 
 
+# ------------------------------------------------------------- inboxes (accounts)
+
+@app.get("/api/accounts")
+def accounts():
+    return {"accounts": _accounts_list()}
+
+
+@app.post("/api/accounts")
+async def add_account(request: Request):
+    """Add an inbox. The credential is proved against Gmail BEFORE anything is
+    stored, so a typo can never leave a half-configured account that fails
+    silently on every later cycle."""
+    _require_header(request)
+    data = await request.json()
+    address = (data.get("address") or "").strip().lower()
+    app_password = (data.get("app_password") or "").replace(" ", "")
+    label = (data.get("label") or "").strip()
+    if not address or "@" not in address or " " in address:
+        return {"ok": False, "message": "Enter the full Gmail address for this inbox."}
+    if not app_password:
+        return {"ok": False, "message": "This inbox needs its own 16-character app password."}
+    with db.conn() as c:
+        dup = c.execute("SELECT id FROM accounts WHERE address=?", (address,)).fetchone()
+    if dup:
+        return {"ok": False, "message": f"{address} is already connected."}
+
+    ok, msg = poller.validate_gmail(address, app_password)
+    if not ok:
+        return {"ok": False, "message": msg}
+
+    with db.conn() as c:
+        cur = c.execute(
+            "INSERT INTO accounts (address, label, created_at) VALUES (?,?,?)",
+            (address, label, db.now_iso()),
+        )
+        account_id = cur.lastrowid
+    config.set_secret(config.gmail_secret_name(address), app_password)
+    if poll_loop:
+        poll_loop.wake.set()
+    return {"ok": True, "id": account_id, "message": f"{address} connected."}
+
+
+@app.delete("/api/accounts/{account_id}")
+def delete_account(account_id: int, request: Request):
+    """Removes the inbox row only. Its stored app password is left alone (and
+    never echoed) - re-adding the address re-validates and overwrites it."""
+    _require_header(request)
+    if account_id == 1:
+        return JSONResponse(
+            {"ok": False, "message": "The primary inbox can't be removed - it's the "
+                                     "address MailPilot sends its own notifications to. "
+                                     "Change it in Settings instead."},
+            status_code=400,
+        )
+    with db.conn() as c:
+        row = c.execute("SELECT address FROM accounts WHERE id=?", (account_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "no such inbox")
+        c.execute("DELETE FROM accounts WHERE id=?", (account_id,))
+    return {"ok": True, "message": f"{row['address']} removed."}
+
+
 # ------------------------------------------------------------- queue + history
 
 def _drafts_where(clause: str, params=(), order: str = "d.updated_at DESC"):
     with db.conn() as c:
         rows = c.execute(
             "SELECT d.id, d.body, d.status, d.kind, d.block_reason, d.created_at,"
-            " d.updated_at, d.sent_at, e.from_address, e.from_name, e.subject,"
-            " e.body_text, e.received_at, e.vip"
-            f" FROM drafts d JOIN emails e ON e.id = d.email_id WHERE {clause}"
+            " d.updated_at, d.sent_at, d.snoozed_until, d.meta_json,"
+            " e.from_address, e.from_name, e.subject,"
+            " e.body_text, e.received_at, e.vip, e.account_id, a.address AS account"
+            f" FROM drafts d JOIN emails e ON e.id = d.email_id"
+            " LEFT JOIN accounts a ON a.id = e.account_id"
+            f" WHERE {clause}"
             f" ORDER BY {order} LIMIT 200",
             params,
         ).fetchall()
@@ -166,7 +300,17 @@ def _drafts_where(clause: str, params=(), order: str = "d.updated_at DESC"):
 
 @app.get("/api/queue")
 def queue():
-    return {"drafts": _drafts_where("d.status='queued'", order="e.vip DESC, d.updated_at DESC")}
+    all_queued = _drafts_where("d.status='queued'", order="e.vip DESC, d.updated_at DESC")
+    visible, snoozed_count = [], 0
+    for d in all_queued:
+        if timectl.is_snoozed(d.get("snoozed_until") or ""):
+            snoozed_count += 1
+        else:
+            visible.append(d)
+    # A draft returning from snooze surfaces at the top (stable sort keeps the
+    # vip/updated_at order within each group).
+    visible.sort(key=lambda d: 0 if d.get("snoozed_until") else 1)
+    return {"drafts": visible, "snoozed_count": snoozed_count}
 
 
 @app.get("/api/history")
@@ -178,8 +322,11 @@ def history():
 def skipped():
     with db.conn() as c:
         rows = c.execute(
-            "SELECT id, from_address, from_name, subject, received_at, skip_reason"
-            " FROM emails WHERE status='skipped' ORDER BY id DESC LIMIT 200"
+            "SELECT e.id, e.from_address, e.from_name, e.subject, e.received_at,"
+            " e.skip_reason, e.account_id, a.address AS account"
+            " FROM emails e LEFT JOIN accounts a ON a.id = e.account_id"
+            " WHERE e.status='skipped' AND e.skip_reason != 'radar_seed'"
+            " ORDER BY e.id DESC LIMIT 200"
         ).fetchall()
     return {"emails": [dict(r) for r in rows]}
 
@@ -192,6 +339,15 @@ def errors():
             " WHERE acknowledged=0 ORDER BY id DESC LIMIT 50"
         ).fetchall()
     return {"errors": [dict(r) for r in rows]}
+
+
+@app.get("/api/diagnostics")
+def diagnostics():
+    report = updates.build_diagnostics()
+    return PlainTextResponse(
+        report,
+        headers={"Content-Disposition": 'attachment; filename="mailpilot-diagnostics.txt"'},
+    )
 
 
 @app.post("/api/errors/{error_id}/ack")
@@ -268,6 +424,247 @@ def discard_draft(draft_id: int, request: Request):
             (db.now_iso(), draft_id),
         )
     return {"ok": True}
+
+
+@app.post("/api/drafts/{draft_id}/parley")
+async def start_parley_draft(draft_id: int, request: Request):
+    _require_header(request)
+    cfg = config.load()
+    if not cfg.get("feature_parley"):
+        raise HTTPException(409, "Parley is off - turn it on in Settings > Labs.")
+    if not (cfg.get("parley_availability") or "").strip():
+        raise HTTPException(400, "Set your availability in Settings > Labs first.")
+    with db.conn() as c:
+        draft = c.execute("SELECT * FROM drafts WHERE id=?", (draft_id,)).fetchone()
+        if draft is None:
+            raise HTTPException(404, "no such draft")
+        if draft["status"] != "queued":
+            raise HTTPException(409, f"draft is {draft['status']}, not queued")
+        em = c.execute("SELECT * FROM emails WHERE id=?", (draft["email_id"],)).fetchone()
+    try:
+        body = parley.start_parley(em, cfg["parley_availability"], cfg)
+    except Exception as e:
+        db.record_error("parley", str(e), traceback.format_exc())
+        return JSONResponse({"ok": False, "message": str(e)[:300]}, status_code=502)
+    # Round-trip the state out of the exact bytes that will be sent - one
+    # definition of truth.
+    data = parley.detect(None, body)
+    with db.conn() as c:
+        c.execute(
+            "UPDATE drafts SET body=?, kind='parley', meta_json=?, status='queued',"
+            " updated_at=? WHERE id=? AND status='queued'",
+            (body, json.dumps(data), db.now_iso(), draft_id),
+        )
+    return {"ok": True, "body": body, "parley": data}
+
+
+@app.post("/api/drafts/{draft_id}/negotiate")
+def negotiate_draft(draft_id: int, request: Request):
+    _require_header(request)
+    cfg = config.load()
+    if not cfg.get("feature_negotiation"):
+        raise HTTPException(403, "Negotiation Copilot is off. Turn it on in Settings > Labs.")
+    with db.conn() as c:
+        draft = c.execute("SELECT * FROM drafts WHERE id=?", (draft_id,)).fetchone()
+        if draft is None:
+            raise HTTPException(404, "no such draft")
+        em = c.execute("SELECT * FROM emails WHERE id=?", (draft["email_id"],)).fetchone()
+    try:
+        result = negotiation.draft_negotiation(em, cfg)
+    except Exception as e:
+        db.record_error("negotiation", str(e), traceback.format_exc())
+        return JSONResponse({"ok": False, "message": str(e)[:300]}, status_code=502)
+    stances = result["stances"]
+    with db.conn() as c:
+        c.execute(
+            "UPDATE drafts SET body=?, meta_json=?, status='queued', updated_at=? WHERE id=?",
+            (stances[1]["body"], json.dumps(result), db.now_iso(), draft_id),
+        )
+    return {"ok": True, "stances": stances}
+
+
+@app.post("/api/drafts/{draft_id}/snooze")
+async def snooze_draft(draft_id: int, request: Request):
+    _require_header(request)
+    data = await request.json()
+    option = (data.get("option") or "").strip()
+    try:
+        until = timectl.snooze_until(option)
+    except ValueError:
+        raise HTTPException(400, "Unknown snooze option (use 1d, 3d, or 1w).")
+    with db.conn() as c:
+        row = c.execute("SELECT status FROM drafts WHERE id=?", (draft_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "no such draft")
+        if row["status"] != "queued":
+            raise HTTPException(409, f"draft is {row['status']}, not queued")
+        c.execute(
+            "UPDATE drafts SET snoozed_until=?, notified=1, updated_at=? WHERE id=?",
+            (until, db.now_iso(), draft_id),
+        )
+    return {"ok": True, "snoozed_until": until}
+
+
+# ------------------------------------------------------------- rehearsal
+
+@app.get("/api/rehearsal/candidates")
+def rehearsal_candidates(request: Request, account: str = "", limit: int = 25):
+    _feature("feature_rehearsal")
+    addr, pw = _account_creds(account)
+    try:
+        return {"account": addr, "candidates": rehearsal.list_sent_candidates(addr, pw, limit)}
+    except Exception as e:
+        db.record_error("rehearsal", str(e), traceback.format_exc())
+        return JSONResponse({"ok": False, "message": str(e)[:300]}, status_code=502)
+
+
+@app.post("/api/rehearsal/run")
+async def rehearsal_run(request: Request):
+    _require_header(request)
+    cfg = _feature("feature_rehearsal")
+    data = await request.json()
+    addr, pw = _account_creds(data.get("account") or "")
+    picks = []
+    for item in (data.get("seqs") or [])[:rehearsal.MAX_REHEARSALS_PER_RUN]:
+        if isinstance(item, dict):
+            picks.append((int(item.get("seq") or 0), item.get("message_id") or ""))
+        else:
+            picks.append((int(item), ""))
+    pairs, missing = [], 0
+    for seq, mid in picks:
+        try:
+            pair = rehearsal.fetch_pair(addr, pw, seq, expect_message_id=mid)
+        except Exception as e:
+            db.record_error("rehearsal", f"fetch_pair({seq}): {e}", traceback.format_exc())
+            pair = None
+        if pair:
+            pairs.append(pair)
+        else:
+            missing += 1
+    result = rehearsal.run_rehearsal(pairs, cfg)
+    result["missing_original"] = missing
+    return result
+
+
+@app.get("/api/rehearsal/results")
+def rehearsal_results():
+    _feature("feature_rehearsal")
+    return {"rehearsals": rehearsal.list_rehearsals()}
+
+
+@app.post("/api/rehearsal/{rehearsal_id}/save-voice-sample")
+def rehearsal_save_voice(rehearsal_id: int, request: Request):
+    _require_header(request)
+    _feature("feature_rehearsal")
+    if not rehearsal.save_as_voice_sample(rehearsal_id):
+        raise HTTPException(400, "That reply is too short to be a useful voice sample.")
+    return {"ok": True}
+
+
+# ------------------------------------------------------------- radar
+
+_radar_threads: dict[str, threading.Thread] = {}
+
+
+def _radar_backfill_thread(addr: str, pw: str, force: bool):
+    try:
+        radar.backfill(addr, pw, progress_cb=radar.kv_progress_cb(addr), force=force)
+    except Exception as e:
+        db.record_error("radar", f"Backfill thread died: {e}", traceback.format_exc())
+
+
+@app.get("/api/radar")
+def radar_list():
+    _feature("feature_radar")
+    cfg = config.load()
+    addr = (cfg.get("gmail_address") or "").lower()
+    return {
+        "drifted": radar.compute_drift(),
+        "backfilled": bool(db.kv_get(radar.BACKFILL_DONE_KEY + addr)),
+        "progress": db.kv_get(radar.BACKFILL_PROGRESS_KEY + addr),
+    }
+
+
+@app.get("/api/radar/backfill/status")
+def radar_backfill_status(account: str = ""):
+    _feature("feature_radar")
+    addr = (account or config.load().get("gmail_address") or "").lower()
+    t = _radar_threads.get(addr)
+    return {"running": bool(t and t.is_alive()),
+            "progress": db.kv_get(radar.BACKFILL_PROGRESS_KEY + addr),
+            "done": db.kv_get(radar.BACKFILL_DONE_KEY + addr)}
+
+
+@app.post("/api/radar/backfill")
+async def radar_backfill(request: Request):
+    _require_header(request)
+    _feature("feature_radar")
+    data = await request.json()
+    addr, pw = _account_creds(data.get("account_address") or "")
+    t = _radar_threads.get(addr)
+    if t and t.is_alive():
+        return {"ok": True, "status": "already_running"}
+    t = threading.Thread(target=_radar_backfill_thread,
+                         args=(addr, pw, bool(data.get("force"))),
+                         daemon=True, name=f"radar-backfill-{addr}")
+    _radar_threads[addr] = t
+    t.start()
+    return {"ok": True, "status": "started"}
+
+
+@app.post("/api/radar/dismiss")
+async def radar_dismiss(request: Request):
+    _require_header(request)
+    _feature("feature_radar")
+    data = await request.json()
+    until = radar.dismiss((data.get("address") or ""), int(data.get("days") or 90))
+    if not until:
+        raise HTTPException(400, "No address given.")
+    return {"ok": True, "until": until}
+
+
+@app.post("/api/radar/reconnect")
+async def radar_reconnect(request: Request):
+    _require_header(request)
+    cfg = _feature("feature_radar")
+    data = await request.json()
+    address = (data.get("address") or "").strip().lower()
+    if not address or "@" not in address:
+        raise HTTPException(400, "No address given.")
+    hit = next((d for d in radar.compute_drift() if d["address"] == address), {})
+    user = radar.build_reconnect_prompt(
+        address, data.get("name_hint") or hit.get("name_hint", ""),
+        int(data.get("weeks_since") or hit.get("weeks_since") or 8),
+        hit.get("baseline", ""),
+    )
+    try:
+        body = drafter.generate(drafter.build_system_prompt(cfg), user, cfg)
+    except Exception as e:
+        db.record_error("radar", str(e), traceback.format_exc())
+        return JSONResponse({"ok": False, "message": str(e)[:300]}, status_code=502)
+    now = db.now_iso()
+    # A reconnection has no inbound email, so seed a minimal, clearly-marked row:
+    # the queue, guards and history all key on one, and Guard 2 needs a real
+    # accounts row (its address is who the mail goes out AS).
+    account = _account_row(data.get("account_address") or "")
+    message_id = f"<radar-seed-{uuid.uuid4().hex}@mailpilot>"
+    with db.conn() as c:
+        cur = c.execute(
+            "INSERT INTO emails (message_id, from_address, from_name, subject, body_text,"
+            " received_at, processed_at, status, skip_reason, account_id)"
+            " VALUES (?,?,?,?,?,?,?, 'skipped', 'radar_seed', ?)",
+            (message_id, address, hit.get("name_hint", ""), "Catching up",
+             f"[Relationship Radar] No exchange since {hit.get('last_contact_iso', 'a while ago')}"
+             f" (baseline: {hit.get('baseline', 'regular contact')}).",
+             now, now, account["id"]),
+        )
+        email_id = cur.lastrowid
+        c.execute(
+            "INSERT INTO drafts (email_id, body, status, kind, created_at, updated_at)"
+            " VALUES (?,?, 'queued', 'reconnect', ?, ?)",
+            (email_id, body, now, now),
+        )
+    return {"ok": True, "email_id": email_id}
 
 
 # ------------------------------------------------------------- contacts
@@ -375,6 +772,22 @@ async def save_settings(request: Request):
         changes["notify_cooldown_minutes"] = max(0, int(data["notify_cooldown_minutes"] or 30))
     if "followup_days" in data:
         changes["followup_days"] = max(0, int(data["followup_days"] or 0))
+    if "quiet_start" in data:
+        qs = (data.get("quiet_start") or "").strip()
+        if qs and not timectl.valid_hhmm(qs):
+            raise HTTPException(400, "Quiet start must be HH:MM (24-hour), or blank to turn off.")
+        changes["quiet_start"] = qs
+    if "quiet_end" in data:
+        qe = (data.get("quiet_end") or "").strip()
+        if qe and not timectl.valid_hhmm(qe):
+            raise HTTPException(400, "Quiet end must be HH:MM (24-hour), or blank to turn off.")
+        changes["quiet_end"] = qe
+    for flag in ("vacation_mode", "feature_negotiation", "feature_rehearsal",
+                 "feature_radar", "feature_parley", "negotiation_autodetect"):
+        if flag in data:
+            changes[flag] = bool(data[flag])
+    if "parley_availability" in data:
+        changes["parley_availability"] = (data.get("parley_availability") or "").strip()[:500]
     if "ignore_senders" in data:
         changes["ignore_senders"] = _split(data["ignore_senders"])
     if "only_senders" in data:
@@ -382,9 +795,30 @@ async def save_settings(request: Request):
     if "poll_interval" in changes:
         changes["poll_interval"] = max(60, int(changes["poll_interval"] or 300))
     if data.get("app_password"):
-        config.set_secret("gmail_app_password", data["app_password"].replace(" ", ""))
+        pw = data["app_password"].replace(" ", "")
+        config.set_secret("gmail_app_password", pw)
+        # This field updates the PRIMARY inbox; other inboxes are managed in the
+        # Inboxes section, which re-validates before storing.
+        primary = (changes.get("gmail_address") or config.load().get("gmail_address") or "").strip()
+        if primary:
+            config.set_secret(config.gmail_secret_name(primary), pw)
     if data.get("api_key"):
         config.set_secret("anthropic_api_key", data["api_key"].strip())
+    # Keep account 1 pointed at the primary address, or it silently keeps polling
+    # the old inbox. Skipped if another inbox already holds that address.
+    new_primary = (changes.get("gmail_address") or "").strip().lower()
+    if new_primary:
+        with db.conn() as c:
+            clash = c.execute(
+                "SELECT id FROM accounts WHERE address=? AND id != 1", (new_primary,)
+            ).fetchone()
+            if clash is None:
+                c.execute(
+                    "INSERT INTO accounts (id, address, label, created_at)"
+                    " VALUES (1,?,?,?)"
+                    " ON CONFLICT(id) DO UPDATE SET address=excluded.address",
+                    (new_primary, "Primary", db.now_iso()),
+                )
     config.update(**changes)
     return {"ok": True}
 

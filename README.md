@@ -51,6 +51,29 @@ nothing sends), then flip Live sending on in Settings.
 - **Follow-up nudges** — a sent reply with no response after N days (default 3,
   0 = off) gets a short nudge drafted and queued. Like everything else, it
   never sends itself.
+- **Multiple inboxes** — add more Gmail accounts in Settings; one queue with
+  per-inbox badges, and every reply goes out AS the inbox it arrived in.
+- **Time controls** — quiet hours (no notifications overnight), vacation mode
+  (mail is collected but nothing drafts until you're back), and per-draft
+  snooze (1 day / 3 days / 1 week).
+- **Update banner + diagnostics** — the app tells you when a new release is
+  out, and Settings can export a secrets-scrubbed diagnostics report.
+
+## Labs (experimental, all off by default — Settings → Labs)
+
+- **Negotiation Copilot** — for emails that are really negotiations, drafts
+  three stances (anchor high / meet in the middle / walk away) with rationale;
+  optional auto-detect.
+- **Rehearsal** — replays mail you already answered: MailPilot's draft
+  side-by-side with what you actually sent. Never queued, never sent; one
+  click promotes your real reply into your voice samples.
+- **Relationship Radar** — a one-off headers-only scan of your last 12 months
+  learns who you talk to on a rhythm, then flags people who've gone quiet for
+  2+ months and offers a reconnection draft (through the normal queue).
+- **Parley** — when both correspondents run MailPilot, the two apps settle a
+  meeting time between themselves (max 3 rounds, from your stated
+  availability). Every round is a queued draft a human approves; a recipient
+  without MailPilot just sees a polite scheduling email.
 
 ## What it never does
 

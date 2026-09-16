@@ -11,12 +11,13 @@ Rules that keep it safe and predictable:
 import email
 import email.utils
 import imaplib
+import json
 import re
 import threading
 import traceback
 from html.parser import HTMLParser
 
-from . import config, db, drafter
+from . import attachments, config, db, drafter, timectl
 
 NOREPLY_RE = re.compile(r"(no-?reply|donotreply|mailer-daemon|postmaster)", re.I)
 MAX_BODY = 20_000
@@ -111,11 +112,42 @@ def lookup_contact(from_address: str, db_file=None):
     return row
 
 
-def classify(msg, from_address: str, cfg: dict, rule: str = "normal") -> str:
+def list_accounts(db_file=None) -> list:
+    """Every configured inbox, primary (id 1) first."""
+    with db.conn(db_file) as c:
+        return c.execute("SELECT * FROM accounts ORDER BY id").fetchall()
+
+
+def own_addresses(cfg: dict, db_file=None) -> set:
+    """Every address MailPilot itself owns - ALL inboxes, not just the primary.
+    Mail from any of them is own mail; MailPilot never replies to itself."""
+    addrs = {(cfg.get("gmail_address") or "").lower().strip()}
+    try:
+        for a in list_accounts(db_file):
+            addrs.add((a["address"] or "").lower().strip())
+    except Exception:
+        pass
+    addrs.discard("")
+    return addrs
+
+
+def account_password(account_row, db_file=None) -> str:
+    """The app password for one inbox. Account 1 falls back to the pre-multi-inbox
+    secret name so an install that predates the migration keeps working."""
+    pw = config.get_secret(config.gmail_secret_name(account_row["address"]))
+    if not pw and account_row["id"] == 1:
+        pw = config.get_secret("gmail_app_password")
+    return pw
+
+
+def classify(msg, from_address: str, cfg: dict, rule: str = "normal",
+             own: set = None) -> str:
     """Return '' to draft, or a named skip reason. Contact rules outrank the
     generic filters: auto_skip always skips; vip/always_draft always draft
     (own mail excepted - MailPilot never replies to itself)."""
-    if from_address.lower() == (cfg.get("gmail_address") or "").lower():
+    if own is None:
+        own = own_addresses(cfg)
+    if (from_address or "").lower().strip() in own:
         return "own_address"
     if rule == "auto_skip":
         return "contact_rule_skip"
@@ -133,8 +165,9 @@ def classify(msg, from_address: str, cfg: dict, rule: str = "normal") -> str:
     return ""
 
 
-def store_email(msg, cfg: dict, db_file=None):
-    """Insert the email (dedup on Message-ID). Returns (email_id|None, status, skip_reason)."""
+def store_email(msg, cfg: dict, db_file=None, account_id: int = 1, own: set = None):
+    """Insert the email (dedup on Message-ID), stamped with the inbox it arrived
+    in. Returns (email_id|None, status, skip_reason)."""
     message_id = (msg.get("Message-ID") or "").strip()
     if not message_id:
         message_id = f"<missing-{hash(msg.as_bytes()[:2000])}@mailpilot>"
@@ -151,22 +184,69 @@ def store_email(msg, cfg: dict, db_file=None):
         received_at = db.now_iso()
     contact = lookup_contact(from_address, db_file)
     rule = contact["rule"] if contact else "normal"
-    skip_reason = classify(msg, from_address, cfg, rule)
+    skip_reason = classify(msg, from_address, cfg, rule, own=own)
     status = "skipped" if skip_reason else "drafted"
     refs = (msg.get("References") or "").strip()
+    attachments_json = json.dumps(attachments.extract_attachments(msg))
     with db.conn(db_file) as c:
         dup = c.execute("SELECT id FROM emails WHERE message_id=?", (message_id,)).fetchone()
         if dup:
             return None, "duplicate", ""
         cur = c.execute(
             "INSERT INTO emails (message_id, thread_references, from_address, from_name,"
-            " subject, body_text, received_at, processed_at, status, skip_reason, vip)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            " subject, body_text, received_at, processed_at, status, skip_reason, vip,"
+            " account_id, attachments_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (message_id, refs, from_address, from_name, subject,
              extract_body(msg), received_at, db.now_iso(), status, skip_reason,
-             1 if rule == "vip" else 0),
+             1 if rule == "vip" else 0, account_id, attachments_json),
         )
-        return cur.lastrowid, status, skip_reason
+        email_row_id = cur.lastrowid
+    if cfg.get("feature_radar") and skip_reason not in (
+            "own_address", "bulk_mail", "no_reply_sender"):
+        from . import radar
+        radar.record(from_address, "in", received_at, db_file)
+    return email_row_id, status, skip_reason
+
+
+def _parley_draft(row, cfg, db_file=None):
+    """(body, kind, meta_json) for a parley round, or (None, 'reply', '') to
+    mean 'not a parley - draft this normally'. meta_json is '' and never None:
+    drafts.meta_json is NOT NULL DEFAULT ''."""
+    from . import parley
+
+    inbound = parley.detect(None, parley.strip_quoted(row["body_text"] or ""))
+    if inbound is None:
+        return None, "reply", ""
+
+    # Belt to strip_quoted's braces: our own block, quoted back at us by a human
+    # replying in Gmail, is not a new round from them. kind='parley' also keeps
+    # this clear of the Negotiation feature's stance objects in the same column.
+    with db.conn(db_file) as c:
+        prev = c.execute(
+            "SELECT d.meta_json FROM drafts d JOIN emails e ON e.id = d.email_id"
+            " WHERE lower(e.from_address) = lower(?) AND d.kind = 'parley'"
+            "   AND d.status IN ('sent', 'simulated') AND d.meta_json != ''"
+            " ORDER BY d.id DESC LIMIT 1",
+            (row["from_address"],),
+        ).fetchone()
+    if prev:
+        try:
+            prev_data = json.loads(prev["meta_json"])
+        except Exception:
+            prev_data = None
+        if parley.is_echo(inbound, prev_data):
+            return None, "reply", ""
+
+    availability = cfg.get("parley_availability") or ""
+    body, new_data = parley.respond(inbound, availability, row, cfg)
+    if body is None:
+        # Hand to the human. The note goes in `errors`, which renders as the UI
+        # banner - a log line nobody reads would make this failure silent.
+        note = parley.handoff_reason(inbound, availability)
+        if note:
+            db.record_error("parley", note, "", db_file)
+        return None, "reply", ""
+    return body, "parley", json.dumps(new_data)
 
 
 def draft_for_email(email_id: int, cfg: dict, db_file=None) -> bool:
@@ -176,27 +256,51 @@ def draft_for_email(email_id: int, cfg: dict, db_file=None) -> bool:
         row = c.execute("SELECT * FROM emails WHERE id=?", (email_id,)).fetchone()
     if row is None or row["status"] != "drafted":
         return False
-    try:
-        body = drafter.draft_reply(row, cfg, db_file=db_file)
-    except Exception as e:
-        db.record_error("drafter", str(e), traceback.format_exc(), db_file)
-        with db.conn(db_file) as c:
-            attempts = row["draft_attempts"] + 1
-            if attempts >= MAX_DRAFT_ATTEMPTS:
-                c.execute(
-                    "UPDATE emails SET draft_attempts=?, status='skipped',"
-                    " skip_reason='draft_failed' WHERE id=?",
-                    (attempts, email_id),
-                )
-            else:
-                c.execute("UPDATE emails SET draft_attempts=? WHERE id=?", (attempts, email_id))
-        return False
+
+    # Parley first: a scheduling round REPLACES ordinary drafting, and never
+    # reaches the negotiation autodetect below - two features can't fight over
+    # one meta_json value.
+    body, kind, meta_json = None, "reply", ""
+    if cfg.get("feature_parley"):
+        try:
+            body, kind, meta_json = _parley_draft(row, cfg, db_file)
+        except Exception as e:
+            # Parley never costs you the reply: surface it, then draft normally.
+            db.record_error("parley", str(e), traceback.format_exc(), db_file)
+            body, kind, meta_json = None, "reply", ""
+
+    if body is None:
+        try:
+            atts = (json.loads(row["attachments_json"] or "[]")
+                    if "attachments_json" in row.keys() else [])
+            body = drafter.draft_reply(row, cfg, db_file=db_file,
+                                       extra_context=attachments.attachment_context(atts))
+        except Exception as e:
+            db.record_error("drafter", str(e), traceback.format_exc(), db_file)
+            with db.conn(db_file) as c:
+                attempts = row["draft_attempts"] + 1
+                if attempts >= MAX_DRAFT_ATTEMPTS:
+                    c.execute(
+                        "UPDATE emails SET draft_attempts=?, status='skipped',"
+                        " skip_reason='draft_failed' WHERE id=?",
+                        (attempts, email_id),
+                    )
+                else:
+                    c.execute("UPDATE emails SET draft_attempts=? WHERE id=?", (attempts, email_id))
+            return False
+        if cfg.get("negotiation_autodetect") and cfg.get("feature_negotiation"):
+            from . import negotiation
+            stances = negotiation.detect_stance_output(body)
+            if stances is not None:
+                meta_json = json.dumps(stances)
+                body = stances["stances"][1]["body"]   # "middle" - the sane default
+
     now = db.now_iso()
     with db.conn(db_file) as c:
         c.execute(
-            "INSERT INTO drafts (email_id, body, status, created_at, updated_at)"
-            " VALUES (?,?, 'queued', ?, ?)",
-            (email_id, body, now, now),
+            "INSERT INTO drafts (email_id, body, status, kind, created_at, updated_at, meta_json)"
+            " VALUES (?,?, 'queued', ?, ?, ?, ?)",
+            (email_id, body, kind, now, now, meta_json),
         )
     return True
 
@@ -275,6 +379,11 @@ def notify_new_drafts(cfg: dict, db_file=None) -> int:
         with db.conn(db_file) as c:  # don't stockpile a flood for later re-enabling
             c.execute("UPDATE drafts SET notified=1 WHERE status='queued' AND notified=0")
         return 0
+    if timectl.in_quiet_hours(cfg.get("quiet_start"), cfg.get("quiet_end")):
+        # notified stays 0: when the window ends, the normal cooldown logic
+        # sends ONE digest of everything that accumulated. VIPs wait too -
+        # quiet hours mean quiet.
+        return 0
     has_vip = any(r["vip"] for r in rows)
     if not has_vip:
         last = _parse_dt(db.kv_get("last_notified_at", db_file))
@@ -304,28 +413,19 @@ def notify_new_drafts(cfg: dict, db_file=None) -> int:
     return 0
 
 
-def poll_once(cfg: dict = None, db_file=None) -> dict:
-    """One IMAP cycle. Returns counters for the UI/log."""
-    cfg = cfg or config.load()
-    stats = {"new": 0, "skipped": 0, "drafted": 0, "retried": 0, "followups": 0, "notified": 0}
-    password = config.get_secret("gmail_app_password")
-    if not (cfg.get("gmail_address") and password):
-        return stats
+def _scrub(text: str, secret: str) -> str:
+    """Belt-and-braces: a credential must never reach an errors row."""
+    text = str(text)
+    return text.replace(secret, "***") if secret else text
 
-    # Retry earlier draft failures first (no IMAP needed)
-    with db.conn(db_file) as c:
-        pending = c.execute(
-            "SELECT e.id FROM emails e LEFT JOIN drafts d ON d.email_id=e.id"
-            " WHERE e.status='drafted' AND d.id IS NULL"
-        ).fetchall()
-    for row in pending:
-        stats["retried"] += 1
-        if draft_for_email(row["id"], cfg, db_file):
-            stats["drafted"] += 1
 
+def _poll_account(account, password: str, cfg: dict, stats: dict, own: set,
+                  db_file=None, draft_now: bool = True) -> None:
+    """One inbox's IMAP cycle. Raises on failure - the caller records and moves on."""
+    account_id = account["id"]
     imap = imaplib.IMAP4_SSL("imap.gmail.com", 993)
     try:
-        imap.login(cfg["gmail_address"], password)
+        imap.login(account["address"], password)
         imap.select("INBOX")
         typ, data = imap.search(None, "UNSEEN")
         if typ != "OK":
@@ -336,7 +436,9 @@ def poll_once(cfg: dict = None, db_file=None) -> dict:
             if typ != "OK" or not msg_data or msg_data[0] is None:
                 continue
             msg = email.message_from_bytes(msg_data[0][1])
-            email_id, status, _reason = store_email(msg, cfg, db_file)
+            email_id, status, _reason = store_email(
+                msg, cfg, db_file, account_id=account_id, own=own
+            )
             if status == "duplicate":
                 imap.store(num, "+FLAGS", "\\Seen")
                 continue
@@ -345,25 +447,90 @@ def poll_once(cfg: dict = None, db_file=None) -> dict:
                 stats["skipped"] += 1
                 imap.store(num, "+FLAGS", "\\Seen")
                 continue
-            drafted = draft_for_email(email_id, cfg, db_file)
-            if drafted:
-                stats["drafted"] += 1
-            # Mark seen even if drafting failed: the email row exists locally and
-            # the retry path above owns it now - re-reading it would just dup.
+            if draft_now:
+                drafted = draft_for_email(email_id, cfg, db_file)
+                if drafted:
+                    stats["drafted"] += 1
+            # Mark seen even if drafting failed (or deferred for vacation): the
+            # email row exists locally and the retry path owns it now -
+            # re-reading it would just dup.
             imap.store(num, "+FLAGS", "\\Seen")
     finally:
         try:
             imap.logout()
         except Exception:
             pass
-    try:
-        stats["followups"] = create_followups(cfg, db_file)
-    except Exception as e:
-        db.record_error("followup", str(e), traceback.format_exc(), db_file)
-    try:
-        stats["notified"] = notify_new_drafts(cfg, db_file)
-    except Exception as e:
-        db.record_error("notify", str(e), traceback.format_exc(), db_file)
+
+
+def poll_once(cfg: dict = None, db_file=None) -> dict:
+    """One cycle across EVERY configured inbox. Returns counters for the UI/log.
+
+    A single inbox failing (bad app password, Gmail down) records an error naming
+    that address and the remaining inboxes are still polled - one broken account
+    must never stop the others.
+    """
+    cfg = cfg or config.load()
+    config.migrate_legacy_gmail_secret()
+    stats = {"new": 0, "skipped": 0, "drafted": 0, "retried": 0, "followups": 0,
+             "notified": 0, "accounts": 0, "accounts_failed": 0}
+
+    accounts = list_accounts(db_file)
+    if not accounts:
+        db.ensure_primary_account(db_file)   # self-heal a pre-migration DB
+        accounts = list_accounts(db_file)
+    if not accounts:
+        return stats
+
+    # Vacation mode: keep ingesting + classifying, draft NOTHING. The retry
+    # loop below is exactly the backlog vacation creates, so it's gated too -
+    # the first post-vacation cycle drains it.
+    vacation = bool(cfg.get("vacation_mode"))
+
+    # Retry earlier draft failures first (no IMAP needed, account-independent)
+    with db.conn(db_file) as c:
+        pending = c.execute(
+            "SELECT e.id FROM emails e LEFT JOIN drafts d ON d.email_id=e.id"
+            " WHERE e.status='drafted' AND d.id IS NULL"
+        ).fetchall()
+    if not vacation:
+        for row in pending:
+            stats["retried"] += 1
+            if draft_for_email(row["id"], cfg, db_file):
+                stats["drafted"] += 1
+
+    own = own_addresses(cfg, db_file)
+    for account in accounts:
+        address = account["address"]
+        password = account_password(account, db_file)
+        if not password:
+            stats["accounts_failed"] += 1
+            db.record_error(
+                "poller",
+                f"No app password stored for {address} - add it in Settings > Inboxes.",
+                "", db_file,
+            )
+            continue
+        try:
+            _poll_account(account, password, cfg, stats, own, db_file,
+                          draft_now=not vacation)
+            stats["accounts"] += 1
+        except Exception as e:
+            stats["accounts_failed"] += 1
+            db.record_error(
+                "poller",
+                f"Mail check failed for {address}: {_scrub(e, password)}",
+                _scrub(traceback.format_exc(), password), db_file,
+            )
+
+    if not vacation:
+        try:
+            stats["followups"] = create_followups(cfg, db_file)
+        except Exception as e:
+            db.record_error("followup", str(e), traceback.format_exc(), db_file)
+        try:
+            stats["notified"] = notify_new_drafts(cfg, db_file)
+        except Exception as e:
+            db.record_error("notify", str(e), traceback.format_exc(), db_file)
     return stats
 
 

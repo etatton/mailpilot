@@ -238,12 +238,23 @@ def generate(system_prompt: str, user_prompt: str, cfg: dict) -> str:
 
 
 def draft_reply(email_row, cfg: dict = None, guidance: str = "", previous_draft: str = "",
-                db_file=None) -> str:
+                db_file=None, extra_context: str = "") -> str:
     cfg = cfg or config.load()
+    context = _sender_context(email_row, db_file)
+    if extra_context:
+        context = (context + "\n\n" + extra_context) if context else extra_context
+
+    system_prompt = build_system_prompt(cfg)
+    # Autodetect rides the initial draft only: a Regenerate (always carries
+    # guidance) keeps producing a normal single reply.
+    if (cfg.get("negotiation_autodetect") and cfg.get("feature_negotiation")
+            and not guidance):
+        from . import negotiation
+        system_prompt += "\n\n" + negotiation.negotiation_autodetect_addendum(cfg)
+
     return generate(
-        build_system_prompt(cfg),
-        build_user_prompt(email_row, guidance, previous_draft,
-                          context=_sender_context(email_row, db_file)),
+        system_prompt,
+        build_user_prompt(email_row, guidance, previous_draft, context=context),
         cfg,
     )
 

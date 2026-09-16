@@ -33,11 +33,41 @@ DEFAULTS = {
     "notify_enabled": True,
     "notify_cooldown_minutes": 30,
     "followup_days": 3,            # 0 disables follow-up nudges
+    "quiet_start": "",             # "HH:MM" 24h local, empty = quiet hours off
+    "quiet_end": "",               # "HH:MM" 24h local, empty = quiet hours off
+    "vacation_mode": False,        # keep ingesting; pause drafting/followups/notify
+    # Labs features - experimental, all off until the user flips them
+    "feature_negotiation": False,
+    "feature_rehearsal": False,
+    "feature_radar": False,
+    "feature_parley": False,
+    "negotiation_autodetect": False,
+    "parley_availability": "",     # freeform, e.g. "Tue+Thu 13:00-17:00"
     "claude_cli_path": "",
     "keyring_ok": True,
 }
 
 _SECRET_KEYS = ("gmail_app_password", "anthropic_api_key")
+
+# Per-account Gmail app passwords are stored under "gmail_app_password:<address>".
+# The bare "gmail_app_password" name is the pre-multi-inbox legacy key; it is kept
+# (never deleted) so a downgrade still finds it.
+GMAIL_SECRET_PREFIX = "gmail_app_password:"
+
+
+def gmail_secret_name(address: str) -> str:
+    """The per-account secret name for one inbox address."""
+    return GMAIL_SECRET_PREFIX + (address or "").strip().lower()
+
+
+def _valid_secret_name(name: str) -> bool:
+    if name in _SECRET_KEYS:
+        return True
+    return (
+        name.startswith(GMAIL_SECRET_PREFIX)
+        and len(name) > len(GMAIL_SECRET_PREFIX)
+        and "@" in name[len(GMAIL_SECRET_PREFIX):]
+    )
 
 
 def load() -> dict:
@@ -52,7 +82,7 @@ def load() -> dict:
 
 
 def save(cfg: dict) -> None:
-    clean = {k: v for k, v in cfg.items() if k in DEFAULTS or k in _SECRET_KEYS}
+    clean = {k: v for k, v in cfg.items() if k in DEFAULTS or _valid_secret_name(k)}
     with _LOCK:
         paths.config_path().write_text(
             json.dumps(clean, indent=2), encoding="utf-8"
@@ -68,7 +98,7 @@ def update(**changes) -> dict:
 
 def set_secret(name: str, value: str) -> bool:
     """Store a secret. Returns True if it landed in the OS credential store."""
-    assert name in _SECRET_KEYS
+    assert _valid_secret_name(name), "unknown secret name"
     try:
         import keyring
         keyring.set_password(_SERVICE, name, value)
@@ -87,7 +117,7 @@ def set_secret(name: str, value: str) -> bool:
 
 
 def get_secret(name: str) -> str:
-    assert name in _SECRET_KEYS
+    assert _valid_secret_name(name), "unknown secret name"
     try:
         import keyring
         v = keyring.get_password(_SERVICE, name)
@@ -99,7 +129,7 @@ def get_secret(name: str) -> str:
 
 
 def delete_secret(name: str) -> None:
-    assert name in _SECRET_KEYS
+    assert _valid_secret_name(name), "unknown secret name"
     try:
         import keyring
         keyring.delete_password(_SERVICE, name)
@@ -109,3 +139,32 @@ def delete_secret(name: str) -> None:
     if name in cfg:
         cfg.pop(name, None)
         save(cfg)
+
+
+_legacy_migrated = False
+
+
+def migrate_legacy_gmail_secret() -> bool:
+    """Copy the pre-multi-inbox app password onto the primary account's own key.
+
+    Idempotent and value-blind: nothing is printed, logged, or returned but a
+    bool. The legacy secret is deliberately KEPT, so nothing is lost if this
+    install is ever rolled back.
+    """
+    global _legacy_migrated
+    if _legacy_migrated:
+        return False
+    cfg = load()
+    address = (cfg.get("gmail_address") or "").strip()
+    if not address:
+        return False
+    name = gmail_secret_name(address)
+    if get_secret(name):
+        _legacy_migrated = True
+        return False
+    legacy = get_secret("gmail_app_password")
+    if not legacy:
+        return False
+    set_secret(name, legacy)
+    _legacy_migrated = True
+    return True
